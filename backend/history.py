@@ -70,3 +70,11 @@ def add_visit(trip_id: str, visit: Dict) -> Dict:
 def list_visits(trip_id: str) -> List[Dict]:
     rows = query_all("SELECT * FROM visits WHERE trip_id=?", (trip_id,))
     return [dict(r) for r in rows]
+
+
+def delete_visit(trip_id: str, visit_id: int) -> bool:
+    """개별 방문 기록을 삭제한다."""
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM visits WHERE visit_id=? AND trip_id=?", (visit_id, trip_id))
+        conn.commit()
+    return cur.rowcount > 0

@@ -138,6 +138,13 @@ def get_visits(trip_id: str) -> Dict:
     return {"visits": visits, "count": len(visits)}
 
 
+@app.delete("/api/trips/{trip_id}/visits/{visit_id}")
+def remove_visit(trip_id: str, visit_id: int) -> Dict:
+    if not history.delete_visit(trip_id, visit_id):
+        raise HTTPException(status_code=404, detail="방문 기록을 찾을 수 없습니다.")
+    return {"deleted": visit_id}
+
+
 @app.exception_handler(Exception)
 async def error_handler(request, exc):  # pragma: no cover - 프레임워크 오류 처리
     return JSONResponse(status_code=500, content={"detail": str(exc)})

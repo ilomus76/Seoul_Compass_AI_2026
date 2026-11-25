@@ -12,8 +12,9 @@
     <nav>
       <a href="#input">일정 만들기</a><a href="#map">360도 분석</a>
       <a href="#schedule">일정표</a><a href="#routes">추천 경로</a>
-      <a href="#report">기대치 리포트</a><a href="#history">나의 여행 기록</a>
+      <a href="#report">기대치 리포트</a><a href="#history">나의 여행 기록</a><a href="#settings">설정</a>
     </nav>
+    <button id="themeBtn" class="ghost theme-btn" type="button" title="테마 전환">◐ 테마</button>
   </header>
 
   <main>
@@ -52,8 +53,12 @@
     </section>
 
     <section id="map" class="card">
-      <h2>360도 방향 분석 <small>8개 구역 · 45도 단위 · 멀티컬러 시각화</small></h2>
+      <h2>360도 방향 분석 <small>8개 구역 · 45도 단위 · 지도 매핑</small></h2>
       <p class="hint">지도를 클릭하면 출발지 좌표가 변경됩니다. 색이 진할수록 관심도 점수가 높습니다.</p>
+      <div class="row view-toggle">
+        <button id="mapModeGeo" class="primary" type="button">지도 보기</button>
+        <button id="mapModePolar" class="ghost" type="button">컴패스 보기</button>
+      </div>
       <div id="compass" class="compass"></div>
       <div id="compassLegend" class="compass-legend"></div>
       <div id="directionScores" class="score-list"></div>
@@ -71,9 +76,10 @@
     </section>
 
     <section id="schedule" class="card">
-      <h2>시간대별 일정표</h2>
+      <h2>시간대별 일정표 <small>행을 누르면 상세 정보, 시간 수정, 장소 변경이 가능합니다</small></h2>
       <table id="scheduleTable"><thead><tr><th>활동</th><th>장소</th><th>계획</th><th>예상 시작</th><th>예상 종료</th><th>고정</th></tr></thead><tbody></tbody></table>
       <p id="conflicts" class="warn"></p>
+      <div id="scheduleDetail" class="detail-panel" hidden></div>
     </section>
 
     <section id="routes" class="card">
@@ -87,9 +93,31 @@
     </section>
 
     <section id="history" class="card">
-      <h2>나의 여행 기록</h2>
+      <h2>나의 여행 기록 <small>일정과 실제 방문 기록은 분리 저장됩니다</small></h2>
       <div class="row"><button id="saveTripBtn" class="primary" type="button">현재 일정 저장</button><button id="refreshTripsBtn" class="ghost" type="button">새로고침</button></div>
       <div id="tripList" class="trip-list"></div>
+      <div id="visitPanel" class="detail-panel" hidden></div>
+    </section>
+
+    <section id="settings" class="card">
+      <h2>설정 <small>가중치 · 화면 · 데이터 출처</small></h2>
+      <div class="settings-grid">
+        <div class="chart-box">
+          <div class="chart-title">관심사 가중치 (합계 100 기준으로 정규화)</div>
+          <div class="grid-form">
+            <div>관심사 M <input id="swM" type="range" min="0" max="100" value="40" /></div>
+            <div>거리 D <input id="swD" type="range" min="0" max="100" value="25" /></div>
+            <div>품질 Q <input id="swQ" type="range" min="0" max="100" value="20" /></div>
+            <div>방문 가능성 V <input id="swV" type="range" min="0" max="100" value="15" /></div>
+          </div>
+          <p class="hint">입력 화면의 가중치와 서로 연동됩니다.</p>
+        </div>
+        <div class="chart-box">
+          <div class="chart-title">데이터 및 연동 상태</div>
+          <div id="apiStatus" class="status-list"></div>
+          <p class="hint">API 키는 .env 파일로만 관리하며 소스에 저장하지 않습니다.</p>
+        </div>
+      </div>
     </section>
   </main>
   <div id="toast" class="toast" hidden></div>
