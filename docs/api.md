@@ -18,7 +18,6 @@
 | DELETE | `/api/trips/{id}` | 삭제 |
 | POST | `/api/trips/{id}/visits` | 방문 기록 저장 |
 | GET | `/api/trips/{id}/visits` | 방문 기록 조회 |
-| DELETE | `/api/trips/{id}/visits/{visit_id}` | 방문 기록 삭제 |
 
 요청/응답 스키마는 `backend/schemas.py`에 정의되어 있습니다.
 실제 경로 API 미연동 상태에서는 이동시간이 추정치임을 응답에 명시합니다.

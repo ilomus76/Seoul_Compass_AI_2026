@@ -9,8 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ai_parser, history, optimizer, report, schedule
-from .config import FRONTEND_DIR, HOST, PORT
+from . import ai_parser, density, history, optimizer, report, safety, schedule, weather
+from .config import FRONTEND_DIR, HOST, KAKAO_JAVASCRIPT_KEY, PORT
 from .direction import analyze_directions, calculate_bearing, get_direction
 from .places import find_by_keywords, load_places, search_places
 from .scoring import score_directions, score_place
@@ -143,6 +143,70 @@ def remove_visit(trip_id: str, visit_id: int) -> Dict:
     if not history.delete_visit(trip_id, visit_id):
         raise HTTPException(status_code=404, detail="방문 기록을 찾을 수 없습니다.")
     return {"deleted": visit_id}
+
+
+@app.get("/api/weather")
+def get_weather(latitude: float = 37.5665, longitude: float = 126.9780, date: str | None = None) -> Dict:
+    """날씨를 조회하고 실내/실외 권장 여부를 반환한다."""
+    return weather.get_weather(latitude, longitude, date)
+
+
+@app.post("/api/density/analyze")
+def density_analyze(payload: Dict) -> Dict:
+    """시간별 플랜과 전체 장소를 연관해 밀집도를 분석한다."""
+    return density.analyze_density(
+        float(payload.get("latitude", 37.5665)), float(payload.get("longitude", 126.9780)),
+        payload.get("activities", []), float(payload.get("radius_km", 5.0)))
+
+
+@app.post("/api/routes/options")
+def route_options(payload: Dict) -> Dict:
+    """구간별 이동수단 options를 교통비·혼잡도·시간 기준으로 정렬해 반환한다."""
+    lat = float(payload.get("latitude", 37.5665)); lng = float(payload.get("longitude", 126.9780))
+    radius = float(payload.get("radius_km", 5.0))
+    result = optimizer.recommend_routes({
+        "start_location": {"latitude": lat, "longitude": lng},
+        "activities": payload.get("activities", []), "radius_km": radius,
+        "transport_modes": payload.get("transport_modes", ["walking"])})
+    options = []
+    for route in result[:1]:
+        for i, node in enumerate(route["nodes"]):
+            crowd = node["place"].get("crowd_by_hour", {})
+            avg_crowd = round(sum(crowd.values()) / len(crowd)) if crowd else 50
+            modes = []
+            for mode, speed, base, fare in (("walking", 5, 1, 0), ("bus", 20, 5, 1200), ("subway", 30, 6, 1400)):
+                minutes = max(1, round(node["distance_km"] / speed * 60)) + base
+                modes.append({"mode": mode, "minutes": minutes, "fare_krw": fare,
+                              "crowd": avg_crowd, "score": round(100 - minutes * 0.5 - fare * 0.01 - avg_crowd * 0.2, 1)})
+            modes.sort(key=lambda m: m["score"], reverse=True)
+            options.append({"order": i + 1, "place": node["place"]["name"],
+                            "distance_km": node["distance_km"], "modes": modes})
+    return {"options": options, "note": "교통비·혼잡도는 샘플 데이터 기반 추정치입니다."}
+
+
+@app.get("/api/safety/guide")
+def get_safety_guide(category: str = "moving") -> Dict:
+    return safety.safety_guide(category)
+
+
+@app.get("/api/safety/riskzones")
+def get_risk_zones(latitude: float = 37.5665, longitude: float = 126.9780,
+                   radius_km: float = 5.0) -> Dict:
+    return safety.risk_zones(latitude, longitude, radius_km)
+
+
+@app.post("/api/safety/help")
+def safety_help(payload: Dict) -> Dict:
+    return safety.nearby_help(float(payload.get("latitude", 37.5665)),
+                              float(payload.get("longitude", 126.9780)),
+                              float(payload.get("radius_km", 5.0)))
+
+
+@app.get("/api/config")
+def frontend_config() -> Dict:
+    """프론트 설정: 카카오맵 키 존재 여부만 노출한다."""
+    return {"kakao_javascript_key_configured": bool(KAKAO_JAVASCRIPT_KEY),
+            "map_mode": "kakao" if KAKAO_JAVASCRIPT_KEY else "svg"}
 
 
 @app.exception_handler(Exception)

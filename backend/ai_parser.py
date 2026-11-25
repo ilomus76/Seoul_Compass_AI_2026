@@ -187,11 +187,27 @@ def parse_user_request(text: str) -> Dict:
     if not any(k in text.lower() for k in ["집으로", "귀가", "집에", "go home", "帰宅", "回家"]):
         warnings.append("귀가 목적지가 지정되지 않아 확인이 필요합니다.")
 
+    # 목적과 특이사항을 별도 항목으로 정리한다(GyuHyeon.md 2번 요구).
+    purpose = list(dict.fromkeys(a["category"] for a in activities))
+    notes = []
+    for pattern, label in [
+        (r"비\s*와|우천|rain|비가", "우천 가능성"),
+        (r"실내만|실내로|indoor", "실내 선호"),
+        (r"야외만|실외|outdoor", "실외 선호"),
+        (r"예산\s*(\d+)\s*원|budget\s*(\d+)", "예산 제한"),
+        (r"혼잡|붐빔|crowded", "혼잡도 민감"),
+        (r"동행|친구|만나", "동행 있음"),
+    ]:
+        if re.search(pattern, text, re.I):
+            notes.append(label)
+
     return {
         "start_location": {"type": "current_location", "latitude": None, "longitude": None},
         "travel_date": None,
         "radius_km": 5.0,
         "transport_modes": ["walking", "bus", "subway"],
+        "purpose": purpose,
+        "special_notes": notes,
         "activities": activities,
         "warnings": warnings,
     }

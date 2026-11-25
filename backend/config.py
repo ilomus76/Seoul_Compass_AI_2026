@@ -14,6 +14,7 @@ HOST = os.getenv("HOST", "127.0.0.1")
 
 # 외부 API 키는 소스에 하드코딩하지 않고 환경변수로만 읽는다.
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "")
+KAKAO_JAVASCRIPT_KEY = os.getenv("KAKAO_JAVASCRIPT_KEY", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 
 # 검색 기본값 (AGENTS.md 5.2)

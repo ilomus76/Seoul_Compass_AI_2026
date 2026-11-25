@@ -154,15 +154,22 @@
         <text x="8" y="-7">${esc(p.name)}</text><title>${esc(p.name)} · ${p.distance_km}km · ${p.score || 0}점</title></g>`;
     }).join('');
 
-    const nodes = route && route.nodes ? route.nodes : [];
-    const pts = nodes.map((n) => geoProject(n.place.lat, n.place.lng, center, radius, extent));
-    const pointString = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-    const routePath = pts.length > 1
-      ? `<polyline class="route-line" points="${pointString}"/>
-         <circle class="flow-dot" r="3.5" fill="#b45f54"><animateMotion dur="3.2s" repeatCount="indefinite"
-           path="M${pointString.replace(/ /g, ' L')}"/></circle>` : '';
-    const routeNodes = pts.map((p, i) => `<circle class="route-node" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9"/>
-      <text class="route-num" x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}">${i + 1}</text>`).join('');
+    // TOP3 경로를 모두 지도에 겹쳐 표시한다(GyuHyeon.md 14번).
+    const allRoutes = data.routes && data.routes.length ? data.routes : (route ? [route] : []);
+    const routeColors = ['#b8914e', '#2f8f83', '#b45f54'];
+    let routePath = '', routeNodes = '';
+    allRoutes.forEach((r, idx) => {
+      const pts = (r.nodes || []).map((n) => geoProject(n.place.lat, n.place.lng, center, radius, extent));
+      if (pts.length < 2) return;
+      const pointString = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      routePath += `<polyline class="route-line" style="stroke:${routeColors[idx % 3]}" points="${pointString}"/>`;
+      if (idx === 0) {
+        routePath += `<circle class="flow-dot" r="3.5" fill="${routeColors[idx % 3]}"><animateMotion dur="3.2s" repeatCount="indefinite"
+          path="M${pointString.replace(/ /g, ' L')}"/></circle>`;
+        routeNodes = pts.map((p, i) => `<circle class="route-node" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9"/>
+          <text class="route-num" x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}">${i + 1}</text>`).join('');
+      }
+    });
 
     container.innerHTML = `<svg viewBox="0 0 600 600" preserveAspectRatio="xMidYMid slice" role="img" aria-label="지도에 매핑된 360도 방향 분석">
       <defs><linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">

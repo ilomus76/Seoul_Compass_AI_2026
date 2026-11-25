@@ -4,13 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Seoul Compass AI — 관측 데스크</title>
-  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/style.css?v=16" />
 </head>
 <body data-theme="light">
   <!-- 상단: 인라인 질문 -->
   <header class="topbar">
     <div class="brand">SEOUL <b>COMPASS</b> AI <span>v1.0 · OBSERVATORY</span></div>
     <form id="quickForm" class="quick-form">
+      <select id="uiLang" aria-label="화면 언어" title="화면 언어">
+        <option value="ko">한국어</option><option value="en">English</option>
+        <option value="ja">日本語</option><option value="zh">中文</option>
+      </select>
       <select id="voiceLang" aria-label="음성/입력 언어">
         <option value="ko-KR">한국어</option><option value="en-US">English</option>
         <option value="ja-JP">日本語</option><option value="zh-CN">中文</option>
@@ -22,6 +26,7 @@
     <div class="top-actions">
       <button id="mapModeGeo" class="ghost active" type="button">지도</button>
       <button id="mapModePolar" class="ghost" type="button">컴패스</button>
+      <button id="sim3dBtn" class="ghost" type="button">3D 시뮬</button>
       <button id="themeBtn" class="ghost" type="button">☀ 라이트</button>
     </div>
   </header>
@@ -31,6 +36,7 @@
     <aside class="rail-left">
       <nav class="rail-nav" aria-label="섹션 이동">
         <button type="button" data-view="console" class="active" title="탐색">⌕<small>탐색</small></button>
+        <button type="button" data-view="planner" title="플랜">✦<small>플랜</small></button>
         <button type="button" data-view="plan" title="일정">▤<small>일정</small></button>
         <button type="button" data-view="archive" title="기록">◷<small>기록</small></button>
         <button type="button" data-view="settings" title="설정">⚙<small>설정</small></button>
@@ -89,6 +95,39 @@
           <div class="chart-box"><div class="chart-title">혼잡 호라이즌 · 히트맵</div><div id="crowdHorizon"></div><div id="crowdHeat" class="heat-grid"></div></div>
           <div class="chart-box"><div class="chart-title">경로 품질 추이</div><div id="routeQuality"></div><div id="scoreGauge" class="gauge-box"></div></div>
         </div>
+        <div class="view-panel" data-panel="planner" hidden>
+          <section id="parseOutput" class="inner-section">
+            <div class="section-head"><p class="eyebrow">PARSED PLAN</p><h2>플랜 구조화 결과</h2></div>
+            <div id="parsedPlan" class="detail-panel"></div>
+          </section>
+          <section id="densityPanel" class="inner-section">
+            <div class="section-head"><p class="eyebrow">DENSITY</p><h2>시간별 장소 밀집도</h2></div>
+            <p class="hint">구역을 선택하면 플랜 순서에 맞는 이동경로와 교통수단을 분석합니다.</p>
+            <div id="densityList" class="route-list"></div>
+          </section>
+          <section id="weatherPanel" class="inner-section">
+            <div class="section-head"><p class="eyebrow">WEATHER</p><h2>날씨 기반 실내·실외 적용</h2></div>
+            <div id="weatherBox" class="detail-panel"></div>
+          </section>
+          <section id="transportPanel" class="inner-section">
+            <div class="section-head"><p class="eyebrow">TRANSPORT</p><h2>추천 이동수단</h2></div>
+            <div id="transportList" class="route-list"></div>
+          </section>
+          <section id="alarmPanel" class="inner-section">
+            <div class="section-head"><p class="eyebrow">ALARM</p><h2>시간 알람</h2></div>
+            <p class="hint">활동을 시작하면 왕복 시간의 절반 시점에 알람이 울립니다.</p>
+            <div id="alarmList" class="route-list"></div>
+          </section>
+          <section id="safetyPanel" class="inner-section">
+            <div class="section-head"><p class="eyebrow">SAFETY</p><h2>안전 지침 · 위급 신고</h2></div>
+            <div id="safetyBox" class="detail-panel"></div>
+          </section>
+          <section id="chatPanel" class="inner-section">
+            <div class="section-head"><p class="eyebrow">AI CHATBOT</p><h2>자연어·다국어 가이드</h2></div>
+            <div id="chatLog" class="chat-log"></div>
+            <form id="chatForm" class="row"><input id="chatInput" placeholder="궁금한 여행 질문을 입력하세요" /><button class="primary" type="submit">질문</button></form>
+          </section>
+        </div>
         <div class="view-panel" data-panel="plan" hidden>
           <section id="schedule" class="inner-section">
             <div class="section-head"><p class="eyebrow">ITINERARY</p><h2>시간대별 일정표</h2></div>
@@ -143,12 +182,13 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/js/charts.js"></script>
-  <script src="/js/compass.js"></script>
-  <script src="/js/map.js"></script>
-  <script src="/js/schedule.js"></script>
-  <script src="/js/route.js"></script>
-  <script src="/js/history.js"></script>
-  <script src="/js/app.js"></script>
+  <script src="/js/charts.js?v=16"></script>
+  <script src="/js/compass.js?v=16"></script>
+  <script src="/js/map.js?v=16"></script>
+  <script src="/js/schedule.js?v=16"></script>
+  <script src="/js/route.js?v=16"></script>
+  <script src="/js/history.js?v=16"></script>
+  <script src="/js/i18n.js?v=16"></script>
+  <script src="/js/app.js?v=16"></script>
 </body>
 </html>

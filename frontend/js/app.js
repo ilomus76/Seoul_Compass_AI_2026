@@ -9,7 +9,8 @@
   const state = {
     parsed: null, routes: [], selectedRoute: null, startDate: null, tripId: null,
     mapMode: 'geo', gps: { used: false, source: null, accuracy: null },
-    watchId: null, scrubTimer: null, voice: null, listening: false
+    watchId: null, scrubTimer: null, voice: null, listening: false,
+    density: null, transport: null, alarms: [], chat: [], weather: null
   };
   let lastPlaces = [], lastScores = [];
   let reportCache = {};
@@ -40,7 +41,7 @@
     const payload = {
       start: { latitude: Number($('lat').value), longitude: Number($('lng').value) },
       radius_km: Number($('radius').value) || 5,
-      places: lastPlaces, scores: lastScores, route: state.selectedRoute
+      places: lastPlaces, scores: lastScores, route: state.selectedRoute, routes: state.routes
     };
     if (state.mapMode === 'geo') SeoulCompassMap.renderGeo($('compass'), payload);
     else SeoulCompassMap.render($('compass'), payload);
@@ -179,6 +180,187 @@
     return reportCache[key];
   }
 
+  /* ---------- 전문가용 플랜 패널 ---------- */
+  function renderParsedPlan() {
+    const box = $('parsedPlan');
+    const p = state.parsed;
+    if (!p) { box.innerHTML = '<p class="hint">분석 후 구조화 결과가 표시됩니다.</p>'; return; }
+    const item = (label, value) => `<div><b>${esc(label)}</b><span>${esc(value || '-')}</span></div>`;
+    box.innerHTML = `<div class="detail-grid">
+      ${item('날짜', p.travel_date || '미지정')}
+      ${item('시간', (p.activities || []).map(a => a.start_time || a.preferred_time || a.earliest_start).filter(Boolean).join(' · '))}
+      ${item('장소', (p.activities || []).map(a => a.location || a.keyword).filter(Boolean).join(' · '))}
+      ${item('목적', (p.purpose || []).join(' · '))}
+      ${item('특이사항', (p.special_notes || []).join(' · '))}
+      ${item('신뢰도', (p.warnings || []).length ? '확인 필요' : '높음')}
+    </div>`;
+  }
+
+  function renderDensity(data) {
+    state.density = data;
+    const box = $('densityList');
+    const sectors = (data && data.sectors) || [];
+    if (!sectors.length) { box.innerHTML = '<p class="hint">분석 후 밀집도가 표시됩니다.</p>'; return; }
+    box.innerHTML = sectors.map((s, i) => {
+      const top = (s.clusters || [])[0];
+      const width = top ? Math.min(100, top.count / Math.max(1, s.total_places) * 100) : 0;
+      return `<article class="route-card" data-density="${i}" style="--card-accent:${['#b8914e','#2f8f83','#b45f54'][i%3]}">
+        <h3>${esc(s.time || '시간 미정')} · ${esc(s.category || '')}</h3>
+        <p>총 ${s.total_places}곳 · 최밀집 ${esc(top ? top.direction : '-')} ${top ? top.count : 0}곳 (평균 ${top ? top.avg_score : 0}점)</p>
+        <div class="bar-track"><div class="bar-fill" style="width:${width.toFixed(0)}%;--bar-color:#b8914e"></div></div>
+        <p>${(s.top_places || []).slice(0,3).map(p => esc(p.name)).join(' · ')}</p>
+        <button class="ghost select-density" type="button">이 구역 경로 분석</button>
+      </article>`;
+    }).join('');
+    box.querySelectorAll('.select-density').forEach(btn => btn.addEventListener('click', async () => {
+      const i = Number(btn.closest('[data-density]').dataset.density);
+      await analyzeTransport(sectors[i]);
+      toast('선택한 밀집 구역의 이동 경로를 분석했습니다.');
+    }));
+  }
+
+  async function analyzeTransport(sector) {
+    const cfg = inputs();
+    const activities = (state.parsed && state.parsed.activities) || [];
+    try {
+      const data = await post('/api/routes/options', {
+        latitude: cfg.lat, longitude: cfg.lng, radius_km: cfg.radius,
+        transport_modes: cfg.modes, activities });
+      state.transport = data;
+      const box = $('transportList');
+      box.innerHTML = (data.options || []).map(o => `<article class="route-card">
+        <h3>${o.order}순서 · ${esc(o.place)} · ${o.distance_km}km</h3>
+        ${o.modes.map(m => `<div class="bar-row"><span>${esc(m.mode)}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,m.score).toFixed(0)}%;--bar-color:#2f8f83"></div></div>
+          <span>${m.minutes}분 · ${m.fare_krw}원 · 혼잡 ${m.crowd}%</span></div>`).join('')}
+      </article>`).join('');
+    } catch (err) { toast(err.message || '이동수단 분석 실패'); }
+  }
+
+  async function renderWeather() {
+    const cfg = inputs();
+    try {
+      const w = await request(`/api/weather?latitude=${cfg.lat}&longitude=${cfg.lng}${cfg.date ? '&date='+cfg.date : ''}`);
+      state.weather = w;
+      $('weatherBox').innerHTML = `<div class="detail-grid">
+        <div><b>기온</b><span>${w.temperature}°C</span></div>
+        <div><b>상태</b><span>${esc(w.condition)}</span></div>
+        <div><b>출처</b><span>${esc(w.source)}</span></div>
+        <div><b>권장</b><span>${w.indoor_recommended ? '실내 중심' : '실외 가능'}</span></div>
+      </div><p class="hint">${w.indoor_recommended ? '실내 장소를 우선 적용했습니다.' : '야외 일정 유지가 가능합니다.'}</p>
+      <ul>${(w.advice || []).map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
+    } catch (err) { $('weatherBox').textContent = err.message; }
+  }
+
+  function renderAlarms() {
+    const rows = (state.selectedRoute && state.selectedRoute.schedule && state.selectedRoute.schedule.timeline) || [];
+    const box = $('alarmList');
+    if (!rows.length) { box.innerHTML = '<p class="hint">일정 분석 후 알람이 생성됩니다.</p>'; return; }
+    state.alarms = rows.map(r => ({ ...r, remaining: (r.duration_minutes || 60) * 60, running: false, timer: null, warned: false }));
+    box.innerHTML = state.alarms.map((a, i) => `<article class="route-card" data-alarm="${i}">
+      <h3>${esc(a.category)} · ${esc(a.place)}</h3>
+      <p>${esc(a.estimated_start)} ~ ${esc(a.estimated_end)} · ${a.duration_minutes}분</p>
+      <div class="bar-track"><div class="bar-fill alarm-bar" style="width:100%;--bar-color:#b8914e"></div></div>
+      <p class="alarm-time">남은 시간 ${Math.floor(a.remaining/60)}분</p>
+      <div class="detail-actions"><button class="primary alarm-start" type="button">시작</button>
+      <button class="ghost alarm-return" type="button">복귀/완료</button></div>
+    </article>`).join('');
+    box.querySelectorAll('.alarm-start').forEach(btn => btn.addEventListener('click', () => {
+      const i = Number(btn.closest('[data-alarm]').dataset.alarm);
+      startAlarm(i);
+    }));
+    box.querySelectorAll('.alarm-return').forEach(btn => btn.addEventListener('click', () => {
+      const i = Number(btn.closest('[data-alarm]').dataset.alarm);
+      stopAlarm(i);
+    }));
+  }
+
+  function startAlarm(i) {
+    const a = state.alarms[i];
+    if (!a || a.running) return;
+    a.running = true; a.warned = false;
+    toast(`${a.place} 알람을 시작했습니다.`);
+    a.timer = setInterval(() => {
+      a.remaining -= 1;
+      const half = (a.duration_minutes || 60) * 30;
+      if (!a.warned && a.remaining <= half) {
+        a.warned = true;
+        toast(`⏰ ${a.place} 왕복 시간의 절반이 지났습니다. 원위치로 복귀하세요.`);
+        beep();
+      }
+      const card = document.querySelector(`[data-alarm="${i}"]`);
+      if (card) {
+        const pct = Math.max(0, a.remaining / ((a.duration_minutes || 60) * 60) * 100);
+        card.querySelector('.alarm-bar').style.width = pct + '%';
+        card.querySelector('.alarm-time').textContent = `남은 시간 ${Math.floor(a.remaining/60)}분`;
+      }
+      if (a.remaining <= 0) { stopAlarm(i); toast(`${a.place} 일정이 종료되었습니다.`); }
+    }, 1000);
+  }
+  function stopAlarm(i) {
+    const a = state.alarms[i];
+    if (!a) return;
+    clearInterval(a.timer); a.timer = null; a.running = false;
+    const card = document.querySelector(`[data-alarm="${i}"]`);
+    if (card) card.querySelector('.alarm-time').textContent = '알람 완료';
+  }
+  function beep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx(), osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880; gain.gain.value = .08;
+      osc.start(); osc.stop(ctx.currentTime + .3);
+    } catch (_) { /* 소리 미지원 시 무시 */ }
+  }
+
+  async function renderSafety() {
+    const cfg = inputs();
+    try {
+      const [guide, help, risks] = await Promise.all([
+        request('/api/safety/guide?category=hiking'),
+        post('/api/safety/help', { latitude: cfg.lat, longitude: cfg.lng, radius_km: cfg.radius }),
+        request(`/api/safety/riskzones?latitude=${cfg.lat}&longitude=${cfg.lng}&radius_km=${cfg.radius}`)
+      ]);
+      const places = [...(help.police || []), ...(help.fire || [])];
+      $('safetyBox').innerHTML = `<div class="detail-grid"><div><b>지침</b><span>${esc(guide.title)}</span></div>
+        <div><b>긴급번호</b><span>${esc(guide.emergency)}</span></div></div>
+        <ul>${(guide.items || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        <div class="detail-actions">
+          <a class="danger" href="tel:112">경찰 112</a><a class="danger" href="tel:119">소방 119</a>
+        </div>
+        <p class="hint">주변 도움 지점: ${places.slice(0,3).map(p=>esc(p.name)).join(' · ') || '데이터 없음'}</p>
+        <p class="caption">위험구역 ${risks.count}곳 (목업 데이터)</p>
+        <ul>${(risks.zones || []).map(z => `<li><b>${esc(z.name)}</b> · ${esc(z.level)} · ${z.distance_km}km · ${esc(z.note)}</li>`).join('') || '<li>주변 위험구역 없음</li>'}</ul>`;
+    } catch (err) { $('safetyBox').textContent = err.message; }
+  }
+
+  /* ---------- AI 챗봇 ---------- */
+  function chatReply(text) {
+    const q = text.toLowerCase();
+    if (/날씨|weather/.test(q)) return state.weather ? `기온 ${state.weather.temperature}°C, ${state.weather.condition}. ${state.weather.indoor_recommended ? '실내 중심을 권장합니다.' : '야외 일정이 가능합니다.'}` : '분석 후 날씨 정보를 확인해 드릴게요.';
+    if (/혼잡|crowd/.test(q)) return state.density ? `시간별 밀집도 ${state.density.sectors.length}개 구역을 분석했습니다.` : '플랜을 분석하면 밀집도를 알려드릴게요.';
+    if (/알람|alarm/.test(q)) return '플랜 패널의 시간 알람에서 시작 버튼을 누르면 왕복 절반 시점에 알립니다.';
+    if (/안전|신고|safety/.test(q)) return '안전 지침과 경찰(112)·소방(119) 연결, 주변 도움 지점을 제공합니다.';
+    if (/이동|교통|transport/.test(q)) return '추천 이동수단 패널에서 교통비·혼잡도·시간을 비교해 선택할 수 있습니다.';
+    return '질문을 이해했습니다. 날씨·혼잡도·알람·안전·이동 중 원하는 주제를 말씀해 주세요.';
+  }
+  function renderChat() {
+    const log = $('chatLog'); if (!log) return;
+    log.innerHTML = (state.chat.length ? state.chat : [{ role:'bot', text:'여행 플랜에 대해 무엇이든 물어보세요. 여러 언어를 지원합니다.' }])
+      .map(m => `<div class="chat-row ${m.role}"><div class="avatar">${m.role==='bot'?'✦':'🙂'}</div><div class="bubble">${esc(m.text)}</div></div>`).join('');
+    log.scrollTop = log.scrollHeight;
+  }
+  $('chatForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = $('chatInput').value.trim(); if (!text) return;
+    $('chatInput').value = '';
+    state.chat.push({ role:'user', text });
+    state.chat.push({ role:'bot', text: chatReply(text) });
+    renderChat();
+  });
+
   /* ---------- 분석 ---------- */
   function inputs() {
     return {
@@ -214,6 +396,16 @@
       state.selectedRoute = state.routes[0] || null;
       lastPlaces = search.places; lastScores = direction.scores;
       renderCurrentMap(); renderSchedule(); renderCharts(search.places, direction.scores);
+      renderParsedPlan();
+      try {
+        const densityData = await post('/api/density/analyze', {
+          latitude: cfg.lat, longitude: cfg.lng, radius_km: cfg.radius, activities });
+        renderDensity(densityData);
+      } catch (err) { $('densityList').textContent = err.message; }
+      await renderWeather();
+      renderAlarms();
+      await renderSafety();
+      await analyzeTransport(null);
       SeoulRouteView.render($('routeList'), state.routes, (route) => {
         state.selectedRoute = route;
         $('scheduleDetail').hidden = true;
@@ -351,11 +543,16 @@
   $('quickForm').addEventListener('submit', (e) => { e.preventDefault(); analyze(); });
   $('mapModeGeo').addEventListener('click', () => { state.mapMode = 'geo'; renderCurrentMap(); });
   $('mapModePolar').addEventListener('click', () => { state.mapMode = 'polar'; renderCurrentMap(); });
+  $('sim3dBtn').addEventListener('click', () => {
+    const on = document.body.classList.toggle('sim3d');
+    $('sim3dBtn').classList.toggle('active', on);
+    toast(on ? '3D 경로 시뮬레이션을 시작했습니다.' : '3D 시뮬레이션을 종료했습니다.');
+  });
   document.querySelectorAll('.rail-nav button').forEach(btn => btn.addEventListener('click', () => {
     const view = btn.dataset.view;
     document.querySelectorAll('.rail-nav button').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.view-panel').forEach(p => { p.hidden = p.dataset.panel !== view; });
-    $('insightTitle').textContent = { console:'시각화', plan:'일정 · 경로', archive:'기록', settings:'설정' }[view];
+    $('insightTitle').textContent = { console:'시각화', planner:'플랜 분석', plan:'일정 · 경로', archive:'기록', settings:'설정' }[view];
   }));
   const savedTheme = localStorage.getItem('sc-theme') || 'light';
   document.body.dataset.theme = savedTheme;
@@ -382,8 +579,17 @@
   $('saveTripBtn').addEventListener('click', saveTrip);
   $('refreshTripsBtn').addEventListener('click', refreshTrips);
 
+  // 화면 언어 전환 (전체 텍스트 자동 번역)
+  $('uiLang').value = SeoulI18n.lang;
+  SeoulI18n.apply();
+  $('uiLang').addEventListener('change', () => {
+    SeoulI18n.setLang($('uiLang').value);
+    toast('화면 언어가 변경되었습니다.');
+  });
+
   initVoice();
   loadStatus();
   refreshTrips().catch(() => {});
   renderScrubber();
+  renderChat();
 })();
