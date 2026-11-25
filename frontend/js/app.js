@@ -38,8 +38,11 @@
 
   /* ---------- 지도 ---------- */
   function renderCurrentMap() {
+    // 입력값이 없으면 분석용 기본값만 사용하고 화면에는 비워둔다.
+    const lat = Number($('lat').value) || 37.5665;
+    const lng = Number($('lng').value) || 126.9780;
     const payload = {
-      start: { latitude: Number($('lat').value), longitude: Number($('lng').value) },
+      start: { latitude: lat, longitude: lng },
       radius_km: Number($('radius').value) || 5,
       places: lastPlaces, scores: lastScores, route: state.selectedRoute, routes: state.routes
     };
@@ -47,8 +50,10 @@
     else SeoulCompassMap.render($('compass'), payload);
     $('mapModeGeo').classList.toggle('active', state.mapMode === 'geo');
     $('mapModePolar').classList.toggle('active', state.mapMode === 'polar');
-    const name = $('locationName').value || '서울 시청';
-    $('mapCaption').textContent = `${name} 기준 · 360도 스캔${state.gps.used ? ' · GPS' : ''}`;
+    const name = $('locationName').value;
+    $('mapCaption').textContent = name
+      ? `${name} 기준 · 360도 스캔${state.gps.used ? ' · GPS' : ''}`
+      : '출발지 미설정 · GPS 또는 지도 선택';
   }
 
   /* ---------- 일정표 ---------- */
@@ -708,9 +713,7 @@
     toast('화면 언어가 변경되었습니다.');
   });
 
-  // 실시간 날짜/시계: 기본 날짜는 오늘, 시계는 1초마다 갱신
-  const today = new Date().toISOString().slice(0, 10);
-  if (!$('date').value) $('date').value = today;
+  // 실시간 시계만 표시하고, 입력값은 사용자가 넣을 때까지 비워둔다.
   function updateClock() {
     const n = new Date();
     $('liveClock').textContent = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${n.toTimeString().slice(0,8)}`;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Seoul Compass AI — 관측 데스크</title>
-  <link rel="stylesheet" href="/css/style.css?v=17" />
+  <link rel="stylesheet" href="/css/style.css?v=18" />
 </head>
 <body data-theme="light">
   <!-- 상단: 인라인 질문 -->
@@ -45,12 +45,12 @@
           <p id="gpsStatus" class="gps-status">GPS 대기 · 위치 권한 필요</p>
         </div>
         <div class="grid-form">
-          <div><label for="lat">위도</label><input id="lat" type="number" step="0.0001" value="37.5665" /></div>
-          <div><label for="lng">경도</label><input id="lng" type="number" step="0.0001" value="126.9780" /></div>
-          <div><label for="radius">반경(km)</label><select id="radius"><option>1</option><option>3</option><option selected>5</option><option>10</option></select></div>
+          <div><label for="lat">위도</label><input id="lat" type="number" step="0.0001" placeholder="GPS 또는 지도 선택" /></div>
+          <div><label for="lng">경도</label><input id="lng" type="number" step="0.0001" placeholder="GPS 또는 지도 선택" /></div>
+          <div><label for="radius">반경(km)</label><select id="radius"><option value="" selected>선택</option><option>1</option><option>3</option><option>5</option><option>10</option></select></div>
           <div><label for="date">날짜</label><input id="date" type="date" /></div>
-          <div><label for="locationName">출발지 이름</label><input id="locationName" value="서울시청" /></div>
-          <div><label for="budget">예산(원)</label><input id="budget" type="number" value="50000" /></div>
+          <div><label for="locationName">출발지 이름</label><input id="locationName" placeholder="예: 서울시청" /></div>
+          <div><label for="budget">예산(원)</label><input id="budget" type="number" placeholder="예: 50000" /></div>
         </div>
         <div><label>이동수단</label>
           <label class="check"><input type="checkbox" class="mode" value="walking" checked />도보</label>
@@ -179,13 +179,13 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/js/charts.js?v=17"></script>
-  <script src="/js/compass.js?v=17"></script>
-  <script src="/js/map.js?v=17"></script>
-  <script src="/js/schedule.js?v=17"></script>
-  <script src="/js/route.js?v=17"></script>
-  <script src="/js/history.js?v=17"></script>
-  <script src="/js/i18n.js?v=17"></script>
-  <script src="/js/app.js?v=17"></script>
+  <script src="/js/charts.js?v=18"></script>
+  <script src="/js/compass.js?v=18"></script>
+  <script src="/js/map.js?v=18"></script>
+  <script src="/js/schedule.js?v=18"></script>
+  <script src="/js/route.js?v=18"></script>
+  <script src="/js/history.js?v=18"></script>
+  <script src="/js/i18n.js?v=18"></script>
+  <script src="/js/app.js?v=18"></script>
 </body>
 </html>
