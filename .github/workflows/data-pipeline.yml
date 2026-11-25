@@ -1,0 +1,38 @@
+name: Data Pipeline — normalize places
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'   # 매일 18:00 UTC (한국 03:00)
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Normalize sample places
+        run: |
+          python scripts/build_places.py data/sample_places.json data/sample_places.normalized.json
+
+      - name: Report diff
+        run: |
+          if git diff --no-index --quiet data/sample_places.json data/sample_places.normalized.json; then
+            echo "변경 사항 없음"
+          else
+            echo "정규화 변경 감지:"
+            git diff --no-index --stat data/sample_places.json data/sample_places.normalized.json || true
+          fi
+
+      - name: Upload normalized data
+        uses: actions/upload-artifact@v4
+        with:
+          name: normalized-places
+          path: data/sample_places.normalized.json
+          retention-days: 7
