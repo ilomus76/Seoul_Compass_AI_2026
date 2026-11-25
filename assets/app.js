@@ -18,7 +18,8 @@
     indoorOnly: false,
     outdoorOnly: false,
     course: [],
-    selected: null
+    selected: null,
+    timeWindow: null
   };
 
   const t = (key) => (I18N[state.lang] && I18N[state.lang][key]) || I18N.ko[key] || key;
@@ -38,6 +39,49 @@
     return { label: '❄ 0°', temp: 0 };
   }
   const weather = seasonWeather();
+
+  /* ---------- 자연어 의도/시간 파싱 (규칙 기반) ---------- */
+  function parseTimeWindow(q) {
+    const range = q.match(/(\d{1,2})\s*시?\s*(?:부터|~|\-|–|에서)\s*(?:오[전후]|am|pm)?\s*(\d{1,2})\s*시?\s*까지?/)
+      || q.match(/(\d{1,2})\s*(?::(\d{2}))?\s*(?:~|\-|–)\s*(\d{1,2})(?::(\d{2}))?/);
+    if (!range) return null;
+    let start = Number(range[1]);
+    let end = Number(range[3] || range[2]);
+    const pm = /오후|pm/.test(q), am = /오전|am/.test(q);
+    if (pm && start < 12) start += 12;
+    if (pm && end < 12) end += 12;
+    if (am && start === 12) start = 0;
+    if (am && end === 12) end = 0;
+    if (end <= start) end += 12;
+    if (start > 24 || end > 24) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    return { start: start * 60, end: end * 60, label: `${pad(start)}:00–${pad(end)}:00` };
+  }
+
+  function detectIntent(text) {
+    const q = String(text || '').toLowerCase();
+    return {
+      q,
+      shopping: /쇼핑|백화점|면세|shopping|shops?/.test(q),
+      food: /맛집|먹|음식|식당|음료|food|cafe|카페/.test(q),
+      night: /야경|전망|night|view/.test(q),
+      heritage: /한옥|궁|역사|palace|heritage/.test(q),
+      nature: /자연|공원|산책|nature|park|hiking/.test(q),
+      indoor: /비\b|우천|실내|rain|indoor|재조정|replan/.test(q),
+      course: /코스|추천|짜줘|plan|recommend|course|itinerary|하고\s?싶어|원해|want/.test(q),
+      time: parseTimeWindow(q)
+    };
+  }
+
+  function categoryHint(q) {
+    const i = detectIntent(q);
+    if (i.shopping) return 'shopping';
+    if (i.food) return 'food';
+    if (i.night) return 'night';
+    if (i.heritage) return 'heritage';
+    if (i.nature) return 'nature';
+    return null;
+  }
 
   function renderWeather() {
     $('#weatherChip').textContent = weather.label;
@@ -69,13 +113,22 @@
 
   function getFiltered() {
     const q = state.query.trim().toLowerCase();
+    const hint = q ? categoryHint(q) : null;
     return SPOTS.filter((s) => {
       if (state.category !== 'all' && s.category !== state.category) return false;
       if (state.indoorOnly && !s.indoor) return false;
       if (state.outdoorOnly && s.indoor) return false;
       if (!q) return true;
-      return [s.name, s.nameEn, s.desc, s.descEn, districtOf(s), catOf(s.category), ...s.tags]
-        .join(' ').toLowerCase().includes(q);
+      if (hint) {
+        const koLabel = (CATEGORIES.find((c) => c.key === hint) || {}).ko || '';
+        return s.category === hint || s.tags.some((tag) =>
+          tag.toLowerCase() === hint || tag === koLabel || (hint === 'shopping' && /쇼핑/i.test(tag)));
+      }
+      const hay = [s.name, s.nameEn, s.desc, s.descEn, districtOf(s), catOf(s.category), ...s.tags]
+        .join(' ').toLowerCase();
+      if (hay.includes(q)) return true;
+      // 문장 입력 대비: 의미 있는 어절 하나라도 일치하면 통과
+      return q.split(/\s+/).some((word) => word.length > 1 && hay.includes(word));
     });
   }
 
@@ -214,8 +267,11 @@
     $$('#courseList [data-remove]').forEach((b) => b.addEventListener('click', () => toggleCourse(b.dataset.remove)));
     const sum = $('#courseSummary');
     sum.hidden = false;
-    sum.innerHTML = `<div><span>${esc(t('course.summary'))}</span><strong>${Math.floor(mins / 60)}h ${mins % 60}m</strong></div>
-      <div><span>${esc(t('course.walk'))}</span><strong>${km.toFixed(1)} km</strong></div>`;
+    const windowMins = state.timeWindow ? state.timeWindow.end - state.timeWindow.start : null;
+    const shownMins = windowMins || mins;
+    sum.innerHTML = `<div><span>${esc(t('course.summary'))}</span><strong>${Math.floor(shownMins / 60)}h ${shownMins % 60}m</strong></div>
+      <div><span>${esc(t('course.walk'))}</span><strong>${km.toFixed(1)} km</strong></div>
+      ${state.timeWindow ? `<div><span>${state.lang === 'en' ? 'Window' : '희망 시간'}</span><strong>${state.timeWindow.label}</strong></div>` : ''}`;
   }
 
   function toggleCourse(id) {
@@ -242,17 +298,24 @@
   }
 
   function recommendCourse(preference) {
+    const text = preference || state.query || '';
+    const intent = detectIntent(text);
     let pool = SPOTS.slice();
-    const pref = (preference || state.query || '').toLowerCase();
-    if (/비|우천|rain|실내|indoor|replan|재조정/.test(pref)) pool = pool.filter((s) => s.indoor);
-    else if (/야경|전망|night|view/.test(pref)) pool = pool.filter((s) => s.category === 'night');
-    else if (/맛집|먹|음식|food|카페|cafe/.test(pref)) pool = pool.filter((s) => s.category === 'food');
-    else if (/한옥|궁|역사|palace|hanok|history/.test(pref)) pool = pool.filter((s) => s.category === 'heritage');
-    else if (/자연|공원|산|nature|park|hiking/.test(pref)) pool = pool.filter((s) => s.category === 'nature');
+    if (intent.indoor) pool = pool.filter((s) => s.indoor);
+    else if (intent.shopping) pool = pool.filter((s) => s.category === 'shopping' || s.tags.some((tag) => /쇼핑|shopping/i.test(tag)));
+    else if (intent.night) pool = pool.filter((s) => s.category === 'night');
+    else if (intent.food) pool = pool.filter((s) => s.category === 'food');
+    else if (intent.heritage) pool = pool.filter((s) => s.category === 'heritage');
+    else if (intent.nature) pool = pool.filter((s) => s.category === 'nature');
     pool.sort((a, b) => b.rating - a.rating);
     let picked = pool.slice(0, 5);
+    if (intent.time) {
+      const slots = Math.max(1, Math.floor((intent.time.end - intent.time.start) / 60));
+      picked = picked.slice(0, Math.min(picked.length, slots));
+    }
     if (!picked.length) picked = [SPOTS[0]];
     state.course = nearestOrder(V.CENTER, picked).map((s) => s.id);
+    state.timeWindow = intent.time;
     state.category = 'all';
     state.indoorOnly = false;
     state.outdoorOnly = false;
@@ -303,27 +366,60 @@
   const spotLine = (s) => `• ${nameOf(s)} (${catOf(s.category)})`;
 
   function answer(message) {
-    const q = message.toLowerCase(), en = state.lang === 'en';
-    if (/도움말|help/.test(q)) return en ? 'Try: course / rain indoor / night / food / weather / help' : '이렇게 물어보세요: 코스 짜줘 / 비 와! 실내로 재조정 / 야경 / 맛집 / 날씨 / 도움말';
-    if (/비|우천|rain|실내|indoor|재조정|replan/.test(q)) {
-      const st = recommendCourse('실내');
-      return en ? `Indoor course: ${st.spots.map((s) => s.nameEn).join(' → ')}. ${Math.floor(st.mins / 60)}h${st.mins % 60}m.`
-                : `비 오는 날 코스를 재조정했어요: ${st.spots.map((s) => s.name).join(' → ')}. 예상 ${Math.floor(st.mins / 60)}시간 ${st.mins % 60}분.`;
+    const en = state.lang === 'en';
+    const intent = detectIntent(message);
+    const q = intent.q;
+    const pad = (n) => String(n).padStart(2, '0');
+    const fmtTime = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
+
+    if (/도움말|help/.test(q)) return en
+      ? 'Try: shopping 2-4pm / course / rain indoor / night / food / weather'
+      : '이렇게 물어보세요: 오후2시부터4시까지 쇼핑 / 코스 짜줘 / 비 와! 실내로 / 야경 / 날씨';
+
+    if (intent.indoor && !intent.shopping) {
+      const st = recommendCourse(message);
+      const when = intent.time ? `${intent.time.label} · ` : '';
+      return en ? `Indoor course ${when}: ${st.spots.map((s) => s.nameEn).join(' → ')}. ${Math.floor(st.mins / 60)}h${st.mins % 60}m.`
+                : `비 오는 날 코스를 재조정했어요. ${when}${st.spots.map((s) => s.name).join(' → ')}. 예상 ${Math.floor(st.mins / 60)}시간 ${st.mins % 60}분.`;
     }
+
+    if (intent.shopping || (intent.course && categoryHint(q))) {
+      const st = recommendCourse(message);
+      const names = st.spots.map((s) => en ? s.nameEn : s.name);
+      if (intent.time) {
+        const step = Math.max(60, Math.floor((intent.time.end - intent.time.start) / Math.max(1, st.spots.length)));
+        const schedule = st.spots.map((s, i) => `${fmtTime(intent.time.start + i * step)} ${en ? s.nameEn : s.name}`).join(' → ');
+        return en
+          ? `Shopping plan for ${intent.time.label}: ${schedule}. Distance ${st.km.toFixed(1)} km. Check actual opening hours before you go.`
+          : `${intent.time.label} 쇼핑 코스를 만들었어요: ${schedule}. 총 이동 ${st.km.toFixed(1)}km. 방문 전 영업시간을 확인해 주세요.`;
+      }
+      return en ? `Shopping course: ${names.join(' → ')}. ${st.km.toFixed(1)} km.`
+                : `쇼핑 코스를 만들었어요: ${names.join(' → ')}. 총 이동 ${st.km.toFixed(1)}km.`;
+    }
+
+    if (intent.time && intent.course) {
+      const st = recommendCourse(message);
+      return en ? `Course for ${intent.time.label}: ${st.spots.map((s) => s.nameEn).join(' → ')}.`
+                : `${intent.time.label}에 맞춘 코스: ${st.spots.map((s) => s.name).join(' → ')}.`;
+    }
+
     if (/코스|추천|짜줘|plan|recommend|course|itinerary/.test(q)) {
       const st = recommendCourse(message);
       return en ? `Course ready: ${st.spots.map((s) => s.nameEn).join(' → ')}. ${st.km.toFixed(1)} km, ${Math.floor(st.mins / 60)}h${st.mins % 60}m.`
                 : `코스를 만들었어요: ${st.spots.map((s) => s.name).join(' → ')}. 도보 ${st.km.toFixed(1)}km, ${Math.floor(st.mins / 60)}시간 ${st.mins % 60}분.`;
     }
-    if (/야경|전망|night|view/.test(q)) return (en ? 'Night views: ' : '야경 명소: ') + SPOTS.filter((s) => s.category === 'night').map(spotLine).join('  ');
-    if (/맛집|먹|음식|food|카페|cafe/.test(q)) return (en ? 'Food: ' : '맛집·카페: ') + SPOTS.filter((s) => s.category === 'food').slice(0, 6).map(spotLine).join('  ');
-    if (/한옥|궁|역사|palace|hanok|history/.test(q)) return (en ? 'Palaces: ' : '궁궐·한옥: ') + SPOTS.filter((s) => s.category === 'heritage').map(spotLine).join('  ');
+    if (intent.night) return (en ? 'Night views: ' : '야경 명소: ') + SPOTS.filter((s) => s.category === 'night').map(spotLine).join('  ');
+    if (intent.food) return (en ? 'Food: ' : '맛집·카페: ') + SPOTS.filter((s) => s.category === 'food').slice(0, 6).map(spotLine).join('  ');
+    if (intent.heritage) return (en ? 'Palaces: ' : '궁궐·한옥: ') + SPOTS.filter((s) => s.category === 'heritage').map(spotLine).join('  ');
+    if (intent.nature) return (en ? 'Nature: ' : '자연·공원: ') + SPOTS.filter((s) => s.category === 'nature').map(spotLine).join('  ');
     if (/지하철|교통|subway/.test(q)) {
       const s = courseStats().spots[0] || SPOTS[0];
       return en ? `${s.nameEn}: ${s.transit}` : `${s.name} 주변 교통: ${s.transit}`;
     }
     if (/날씨|기온|weather/.test(q)) return en ? `Demo estimate: ${weather.label}. Check official forecasts for real weather.` : `데모 추정 날씨는 ${weather.label}입니다. 정확한 예보는 기상청을 확인해 주세요.`;
-    const found = SPOTS.filter((s) => [s.name, s.nameEn, s.desc, s.descEn, ...s.tags].join(' ').toLowerCase().includes(q)).slice(0, 4);
+    const hint = categoryHint(q);
+    const found = hint ? SPOTS.filter((s) => s.category === hint).slice(0, 4)
+      : SPOTS.filter((s) => [s.name, s.nameEn, s.desc, s.descEn, ...s.tags].join(' ').toLowerCase().includes(q)).slice(0, 4);
     return found.length ? (en ? 'Found: ' : '찾은 명소: ') + found.map(spotLine).join('  ') : (en ? 'Try “help”.' : '“도움말”을 입력해 보세요.');
   }
 
