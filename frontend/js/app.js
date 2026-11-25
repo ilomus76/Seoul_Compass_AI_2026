@@ -192,6 +192,7 @@
       ${item('장소', (p.activities || []).map(a => a.location || a.keyword).filter(Boolean).join(' · '))}
       ${item('목적', (p.purpose || []).join(' · '))}
       ${item('특이사항', (p.special_notes || []).join(' · '))}
+      ${item('예산', p.budget_krw ? `${p.budget_krw}원` : '미지정')}
       ${item('신뢰도', (p.warnings || []).length ? '확인 필요' : '높음')}
     </div>`;
   }

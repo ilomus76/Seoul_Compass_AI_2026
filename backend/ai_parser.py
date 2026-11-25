@@ -41,8 +41,7 @@ def extract_times(text: str) -> List[Dict]:
             prefix = earlier_prefix[-1] if earlier_prefix else None
         if prefix in ("오후", "저녁", "밤") and hour < 12:
             hour += 12
-        if prefix == "오전" and hour == 12:
-            hour = 0
+        # 12시는 정오로 처리 (상속된 오전 접두어로 자정이 되지 않게)
         found.append({"time": f"{hour:02d}:{int(minute) if minute else 0:02d}",
                       "position": m.start()})
 
@@ -108,6 +107,23 @@ SYNONYMS = {
 }
 
 
+def parse_date(text: str) -> str | None:
+    """질문에서 여행 날짜를 YYYY-MM-DD로 추출한다."""
+    from datetime import date, timedelta
+    m = re.search(r"(20\d\d)[년\-/\.]\s*(\d{1,2})[월\-/\.]\s*(\d{1,2})", text)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    m = re.search(r"(?<!\d)(\d{1,2})월\s*(\d{1,2})일", text)
+    if m:
+        return f"{date.today().year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    lower = text.lower()
+    if "오늘" in text or "today" in lower:
+        return date.today().isoformat()
+    if "내일" in text or "tomorrow" in lower:
+        return (date.today() + timedelta(days=1)).isoformat()
+    return None
+
+
 def canonical_keywords(keywords: List[str], category: str) -> List[str]:
     """다국어 키워드를 표준 키워드로 확장한다."""
     result = [category]
@@ -129,60 +145,62 @@ def find_location(text: str) -> str | None:
 def parse_user_request(text: str) -> Dict:
     """질문을 AGENTS.md 4.2 형태의 구조화된 dict로 변환한다."""
     times = extract_times(text)
-    activities = []
     fixed_categories = {"hiking", "meeting", "bowling", "subway_station"}
+    candidates = []
 
     for category, keywords in KEYWORD_RULES:
         positions = [text.lower().find(k.lower()) for k in keywords if k.lower() in text.lower()]
         if not positions:
             continue
-        position = min(positions)
         matched = next(k for k in keywords if k.lower() in text.lower())
-        earlier = [t for t in times if t["position"] < position]
-        next_time = next((t["time"] for t in times if t["position"] >= position), None)
-        # 영어처럼 "shop from 2 to 4 pm"에서는 키워드 뒤의 시간이 시작시간이다.
-        last_time = earlier[-1]["time"] if earlier else next_time
+        candidates.append({"category": category, "position": min(positions), "matched": matched,
+                           "keywords": [k for k in keywords if k.lower() in text.lower()]})
+    # 사용자가 말한 순서를 유지한다.
+    candidates.sort(key=lambda c: c["position"])
+
+    activities = []
+    for item in candidates:
+        category, position = item["category"], item["position"]
+        before = [t for t in times if t["position"] < position]
+        after = [t for t in times if t["position"] >= position]
+        last_time = before[-1]["time"] if before else None
+        next_time = after[0]["time"] if after else None
+        # 활동 키워드 바로 앞의 시간을 사용한다(가장 가까운 시간은 다음 활동 것을 끌어올 수 있음).
+        chosen = last_time or next_time
+        window = text[max(0, position - 30):position + 30]
+        has_range = bool(re.search(r"부터|까지|~|from|to\b", window, re.I))
 
         activity = {
-            "id": len(activities) + 1,
-            "category": category,
-            "keyword": matched,
-            "keywords": [k for k in keywords if k.lower() in text.lower()],
-            "start_time": None,
-            "earliest_start": None,
-            "latest_end": None,
-            "preferred_time": None,
-            "fixed_time": False,
+            "id": len(activities) + 1, "category": category, "keyword": item["matched"],
+            "keywords": item["keywords"], "start_time": None, "earliest_start": None,
+            "latest_end": None, "preferred_time": None, "fixed_time": False,
             "fixed_location": category in ("meeting", "subway_station"),
-            "required": True,
-            "duration_minutes": 60,
+            "required": True, "duration_minutes": 60,
         }
         if category in fixed_categories:
-            activity["start_time"] = last_time
-            activity["fixed_time"] = last_time is not None
+            activity["start_time"] = chosen
+            activity["fixed_time"] = chosen is not None
         elif category == "shower":
-            activity["earliest_start"] = last_time
+            activity["earliest_start"] = chosen
             activity["latest_end"] = next_time
         else:
-            # "2시부터 4시까지 쇼핑" 같은 시간 범위는 시작 시각을 희망시간으로 쓴다.
-            if len(earlier) >= 2:
-                def minutes(value):
-                    h, m = value.split(":")
-                    return int(h) * 60 + int(m)
-                if 0 < minutes(earlier[-1]["time"]) - minutes(earlier[-2]["time"]) <= 240:
-                    activity["preferred_time"] = earlier[-2]["time"]
+            if has_range:
+                if after and after[0]["time"] != chosen:
+                    activity["preferred_time"] = after[0]["time"]
+                elif len(before) >= 2:
+                    activity["preferred_time"] = before[-2]["time"]
                 else:
-                    activity["preferred_time"] = last_time
+                    activity["preferred_time"] = chosen
             else:
-                activity["preferred_time"] = last_time
+                activity["preferred_time"] = chosen
         if category == "meeting":
             activity["location"] = find_location(text)
         activity["keywords"] = canonical_keywords(activity["keywords"], category)
         activities.append(activity)
 
+    travel_date = parse_date(text)
     warnings = []
-    date_words = ["오늘", "내일", "today", "tomorrow", "今日", "明天"]
-    if not re.search(r"20\d\d[-/]\d\d[-/]\d\d|\d월\s*\d일", text) and not any(w in text.lower() for w in date_words):
+    if travel_date is None:
         warnings.append("여행 날짜가 지정되지 않아 날짜 정보는 null입니다.")
     if not any(k in text.lower() for k in ["집으로", "귀가", "집에", "go home", "帰宅", "回家"]):
         warnings.append("귀가 목적지가 지정되지 않아 확인이 필요합니다.")
@@ -203,7 +221,11 @@ def parse_user_request(text: str) -> Dict:
 
     return {
         "start_location": {"type": "current_location", "latitude": None, "longitude": None},
-        "travel_date": None,
+        "travel_date": travel_date,
+        "budget_krw": (
+            int(_bm.group(1)) * 10000 if _bm.group(2) else
+            (int(_bm.group(3)) if _bm.group(3) else int(_bm.group(1)))
+        ) if (_bm := re.search(r"예산\s*(?:은\s*)?(\d+)\s*(만원|원)|budget\s*(\d+)", text, re.I)) else None,
         "radius_km": 5.0,
         "transport_modes": ["walking", "bus", "subway"],
         "purpose": purpose,
