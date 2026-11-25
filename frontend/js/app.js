@@ -186,18 +186,40 @@
     const p = state.parsed;
     if (!p) { box.innerHTML = '<p class="hint">분석 후 구조화 결과가 표시됩니다.</p>'; return; }
     const item = (label, value) => `<div><b>${esc(label)}</b><span>${esc(value || '-')}</span></div>`;
+    const planRows = (p.activities || []).map((a, i) => {
+      const start = a.start_time || a.earliest_start || a.preferred_time || '-';
+      let end = '-';
+      if (start !== '-') {
+        const [h, m] = start.split(':').map(Number);
+        const total = h * 60 + m + (a.duration_minutes || 60);
+        end = `${String(Math.floor(total / 60) % 24).padStart(2,'0')}:${String(total % 60).padStart(2,'0')}`;
+      }
+      return `<tr><td>${i + 1}</td><td>${esc(a.keyword || a.category)}</td>
+        <td>${esc(p.travel_date || '-')}</td><td>${esc(start)} ~ ${esc(end)}</td>
+        <td>${esc(a.location || a.place || '-')}</td><td>${esc(a.category)}</td>
+        <td>${esc((p.special_notes || []).join(' · ') || '-')}</td>
+        <td>${a.fixed_time ? '고정' : '추정'}</td></tr>`;
+    }).join('');
     box.innerHTML = `<div class="detail-grid">
       ${item('날짜', p.travel_date || '미지정')}
-      ${item('시간', (p.activities || []).map(a => a.start_time || a.preferred_time || a.earliest_start).filter(Boolean).join(' · '))}
-      ${item('장소', (p.activities || []).map(a => a.location || a.keyword).filter(Boolean).join(' · '))}
+      ${item('예산', p.budget_krw ? `${p.budget_krw}원` : '미지정')}
       ${item('목적', (p.purpose || []).join(' · '))}
       ${item('특이사항', (p.special_notes || []).join(' · '))}
-      ${item('예산', p.budget_krw ? `${p.budget_krw}원` : '미지정')}
-      ${item('신뢰도', (p.warnings || []).length ? '확인 필요' : '높음')}
     </div>
-    <div class="chunk-title">입력 청크 분류 <span>${(p.chunks || []).length}개</span></div>
+    <div class="chunk-title">플랜 구조 데이터 <span>${(p.activities || []).length}개 항목</span></div>
+    <div class="table-wrap"><table class="plan-table"><thead><tr><th>#</th><th>활동</th><th>날짜</th><th>시간</th><th>장소</th><th>목적</th><th>특이사항</th><th>구분</th></tr></thead>
+      <tbody>${planRows}</tbody></table></div>
+    <div class="chunk-title">입력 청크 <span>${(p.chunks || []).length}개</span></div>
     <div class="chunk-row">${(p.chunks || []).map(c => `<span class="chunk chunk-${esc(c.type)}" title="${esc(c.type)}">
-      <b>${esc(c.type)}</b>${esc(c.text)}<i>→ ${esc(c.value)}</i></span>`).join('') || '<span class="hint">청크 없음</span>'}</div>`;
+      <b>${esc(c.type)}</b>${esc(c.text)}<i>→ ${esc(c.value)}</i></span>`).join('') || '<span class="hint">청크 없음</span>'}</div>
+    <div class="detail-actions"><button class="ghost json-toggle" type="button">원본 JSON 보기</button></div>
+    <pre class="json-view" hidden>${esc(JSON.stringify(p, null, 2))}</pre>`;
+    const btn = box.querySelector('.json-toggle');
+    const view = box.querySelector('.json-view');
+    btn.addEventListener('click', () => {
+      view.hidden = !view.hidden;
+      btn.textContent = view.hidden ? '원본 JSON 보기' : '원본 JSON 숨기기';
+    });
   }
 
   function renderDensity(data) {

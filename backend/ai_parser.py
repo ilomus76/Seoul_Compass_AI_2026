@@ -184,6 +184,7 @@ def chunk_text(text: str) -> List[Dict]:
 def parse_user_request(text: str) -> Dict:
     """질문을 AGENTS.md 4.2 형태의 구조화된 dict로 변환한다."""
     times = extract_times(text)
+    chunks = chunk_text(text)
     fixed_categories = {"hiking", "meeting", "bowling", "subway_station"}
     candidates = []
 
@@ -228,6 +229,12 @@ def parse_user_request(text: str) -> Dict:
             activity["preferred_time"] = after[0]["time"] if has_range and after else effective
         if category == "meeting":
             activity["location"] = find_location(text)
+        nearby_places = [c for c in chunks if c["type"] == "place"]
+        if nearby_places:
+            closest = min(nearby_places, key=lambda c: abs(c["start"] - position))
+            activity["place"] = closest["value"] if abs(closest["start"] - position) <= 80 else None
+        else:
+            activity["place"] = None
         activity["keywords"] = canonical_keywords(activity["keywords"], category)
         activities.append(activity)
 
@@ -263,7 +270,7 @@ def parse_user_request(text: str) -> Dict:
         "transport_modes": ["walking", "bus", "subway"],
         "purpose": purpose,
         "special_notes": notes,
-        "chunks": chunk_text(text),
+        "chunks": chunks,
         "activities": activities,
         "warnings": warnings,
     }
