@@ -8,8 +8,10 @@
   function render(tableBody, conflictBox, schedule) {
     if (!tableBody) return;
     const rows = (schedule && schedule.timeline) || [];
+    const colors = (global.SeoulCharts && global.SeoulCharts.COLORS) || {};
+    const names = (global.SeoulCharts && global.SeoulCharts.NAMES_KO) || {};
     tableBody.innerHTML = rows.length
-      ? rows.map((r) => `<tr><td>${esc(r.category)}</td><td>${esc(r.place)}</td>
+      ? rows.map((r) => `<tr><td><span class="activity-chip" style="background:${colors[r.category] || '#4fe0c4'}">${esc(names[r.category] || r.category)}</span></td><td>${esc(r.place)}</td>
           <td>${esc(r.planned_start)}</td><td>${esc(r.estimated_start)}</td>
           <td>${esc(r.estimated_end)}</td><td>${r.fixed_time ? '고정' : '추정'}</td></tr>`).join('')
       : '<tr><td colspan="6">분석 결과가 없습니다.</td></tr>';

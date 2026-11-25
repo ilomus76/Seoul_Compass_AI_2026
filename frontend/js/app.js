@@ -10,6 +10,20 @@
     startDate: null,
     tripId: null
   };
+  let lastPlaces = [], lastScores = {};
+
+  function renderCharts(places, scores) {
+    const conflicts = (state.selectedRoute && state.selectedRoute.schedule
+      && state.selectedRoute.schedule.conflicts
+      && state.selectedRoute.schedule.conflicts.length) || 0;
+    SeoulCharts.kpis($('kpiGrid'), { places, routes: state.routes, conflicts, scores });
+    SeoulCharts.donut($('categoryDonut'), places);
+    SeoulCharts.bars($('scoreBars'), scores);
+    SeoulCharts.heat($('crowdHeat'), state.selectedRoute);
+    const routeScores = {};
+    state.routes.forEach((r, i) => { routeScores[`${i + 1}위`] = r.score; });
+    SeoulCharts.bars($('routeQuality'), routeScores);
+  }
 
   async function post(path, body) {
     const res = await fetch(path, {
@@ -83,6 +97,8 @@
 
       state.routes = result.routes || [];
       state.selectedRoute = state.routes[0] || null;
+      lastPlaces = search.places;
+      lastScores = direction.scores;
 
       SeoulCompassMap.render($('compass'), {
         start: startLocation, radius_km: cfg.radius, places: search.places,
@@ -94,9 +110,11 @@
 
       SeoulScheduleView.render($('scheduleTable').querySelector('tbody'), $('conflicts'),
         state.selectedRoute && state.selectedRoute.schedule);
+      renderCharts(search.places, direction.scores);
       SeoulRouteView.render($('routeList'), state.routes, (route) => {
         state.selectedRoute = route;
         SeoulScheduleView.render($('scheduleTable').querySelector('tbody'), $('conflicts'), route.schedule);
+        renderCharts(lastPlaces, lastScores);
         const report = awaitReport(route);
         SeoulRouteView.renderReport($('reportBody'), report);
         toast('경로를 선택했습니다.');

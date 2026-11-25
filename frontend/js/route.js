@@ -11,11 +11,12 @@
       container.innerHTML = '<p>추천 경로가 없습니다. 질문에 장소 조건을 포함해 주세요.</p>';
       return;
     }
+    const accents = ['#4fe0c4', '#ffc857', '#ff8fb1'];
     container.innerHTML = routes.map((r, i) => {
       const names = r.nodes.map((n) => n.place.name).join(' → ');
       const conflict = r.schedule && r.schedule.conflicts && r.schedule.conflicts.length;
-      return `<article class="route-card" data-index="${i}">
-        <h3>${i + 1}위 · ${esc(r.direction)} 방향 · ${r.score}점</h3>
+      return `<article class="route-card" data-index="${i}" style="--card-accent:${accents[i % accents.length]}">
+        <h3><span class="rank">${i + 1}</span>위 · ${esc(r.direction)} 방향 · ${r.score}점</h3>
         <p>${esc(names)}</p>
         <p>거리 ${r.total_distance_km}km · 이동 ${r.total_travel_minutes}분 · 비용 ${r.estimated_cost_krw}원</p>
         <p>신뢰도 ${Math.round((r.data_confidence || 0) * 100)}% ${conflict ? '· 일정 충돌 있음' : ''}</p>

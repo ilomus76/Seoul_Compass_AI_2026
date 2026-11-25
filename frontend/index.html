@@ -52,10 +52,22 @@
     </section>
 
     <section id="map" class="card">
-      <h2>360도 방향 분석 <small>8개 구역 · 45도 단위</small></h2>
-      <p class="hint">지도를 클릭하면 출발지 좌표가 변경됩니다.</p>
+      <h2>360도 방향 분석 <small>8개 구역 · 45도 단위 · 멀티컬러 시각화</small></h2>
+      <p class="hint">지도를 클릭하면 출발지 좌표가 변경됩니다. 색이 진할수록 관심도 점수가 높습니다.</p>
       <div id="compass" class="compass"></div>
+      <div id="compassLegend" class="compass-legend"></div>
       <div id="directionScores" class="score-list"></div>
+    </section>
+
+    <section class="card">
+      <h2>데이터 개요 <small>시뮬레이션 지표 포함</small></h2>
+      <div id="kpiGrid" class="kpi-grid"></div>
+      <div class="chart-grid">
+        <div class="chart-box"><div class="chart-title">업종별 장소 분포</div><div id="categoryDonut"></div></div>
+        <div class="chart-box"><div class="chart-title">방향별 관심도 점수</div><div id="scoreBars"></div></div>
+        <div class="chart-box"><div class="chart-title">시간대 혼잡 히트맵 (예시)</div><div id="crowdHeat" class="heat-grid"></div></div>
+        <div class="chart-box"><div class="chart-title">경로 품질 추이</div><div id="routeQuality"></div></div>
+      </div>
     </section>
 
     <section id="schedule" class="card">
@@ -82,6 +94,7 @@
   </main>
   <div id="toast" class="toast" hidden></div>
 
+  <script src="/js/charts.js"></script>
   <script src="/js/compass.js"></script>
   <script src="/js/map.js"></script>
   <script src="/js/schedule.js"></script>
