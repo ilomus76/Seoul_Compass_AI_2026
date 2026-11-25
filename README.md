@@ -12,10 +12,16 @@
 # 의존성 설치 (이미 설치되어 있으면 생략)
 pip install -r requirements.txt
 
-# 서버 실행 (전용 포트 9200)
+# 웹 실행 파일 (Windows)
+.\run.ps1        # PowerShell
+run.bat          # 명령 프롬프트 더블클릭
+
+# 또는 직접 실행
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 9200
 # → http://127.0.0.1:9200  (Swagger UI: /docs)
 ```
+
+> `server.py`는 이전 정적 데모용 파일입니다. 현재 서비스는 `backend/main.py`(FastAPI)를 실행해야 합니다.
 
 테스트:
 
