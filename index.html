@@ -3,26 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Seoul Compass AI 2026 — 서울 여행 가이드</title>
-  <meta name="description" content="서울 관광 명소를 찾고, 코스를 설계하고, AI 컨시어지에게 여행을 물어보는 서울 여행 가이드 데모입니다." />
+  <title>Seoul Compass AI 2026 — 비주얼 내비게이터</title>
+  <meta name="description" content="서울 관광 명소를 나침반 뷰와 데이터 시각화로 탐색하고, 코스를 설계하는 서울 여행 가이드 데모입니다." />
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body data-theme="dark">
-  <header class="site-header">
-    <div class="header-inner">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-aurora" aria-hidden="true"></div>
+
+  <header class="command-bar">
+    <div class="command-inner">
       <a class="brand" href="#top" aria-label="Seoul Compass AI 홈">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 40 40" width="38" height="38"><circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" stroke-width="2"/><path d="M26 14l-4 10-8 4 4-10z" fill="currentColor"/><circle cx="20" cy="20" r="2" fill="#0d1424"/></svg>
+          <svg viewBox="0 0 40 40" width="34" height="34"><circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="20" cy="20" r="12" fill="none" stroke="currentColor" stroke-width=".7" opacity=".5"/><path d="M26 14l-3.5 9.5L13 27l3.5-9.5z" fill="currentColor"/><circle cx="20" cy="20" r="1.8" fill="#0b1120"/></svg>
         </span>
-        <span class="brand-text"><strong>SEOUL COMPASS</strong><small>AI 2026 · 서울 여행 가이드</small></span>
+        <span class="brand-text"><strong>SEOUL COMPASS</strong><small>AI 2026 · VISUAL NAVIGATOR</small></span>
       </a>
       <nav class="top-nav" aria-label="주 메뉴">
-        <a href="#explore" data-i18n="nav.explore">명소 찾기</a>
+        <a href="#console" data-i18n="nav.explore">탐색 콘솔</a>
         <a href="#course" data-i18n="nav.course">코스 설계</a>
         <a href="#guide" data-i18n="nav.guide">AI 가이드</a>
       </nav>
       <div class="header-actions">
-        <button id="weatherChip" class="chip weather-chip" type="button" title="계절 기반 추정 날씨">☀ 맑음 · 22°</button>
+        <span class="live-dot" title="데모 데이터"></span>
+        <button id="weatherChip" class="chip weather-chip" type="button" title="계절 기반 추정 날씨">☁ 8°</button>
         <button id="langBtn" class="icon-btn" type="button" title="언어 전환">KO</button>
         <button id="themeBtn" class="icon-btn" type="button" title="테마 전환">◐</button>
       </div>
@@ -30,138 +34,170 @@
   </header>
 
   <main id="top">
-    <!-- HERO -->
-    <section class="hero">
-      <div class="hero-glow" aria-hidden="true"></div>
-      <div class="hero-inner">
-        <p class="eyebrow" data-i18n="hero.eyebrow">데이터로 찾는 나만의 서울</p>
-        <h1><span data-i18n="hero.title1">오늘의 서울,</span><br /><em data-i18n="hero.title2">컴패스가 안내합니다.</em></h1>
-        <p class="hero-desc" data-i18n="hero.desc">명소를 검색하고, 취향에 맞는 코스를 만들고, 궁금한 건 AI 가이드에게 물어보세요.</p>
+    <!-- HERO / BRIEFING -->
+    <section class="briefing">
+      <div class="briefing-copy">
+        <p class="eyebrow"><span class="eyebrow-line"></span><span data-i18n="hero.eyebrow">VISUAL TRAVEL INTELLIGENCE</span></p>
+        <h1><span data-i18n="hero.title1">서울을 읽는</span><br /><em data-i18n="hero.title2">새로운 나침반</em></h1>
+        <p class="hero-desc" data-i18n="hero.desc">방위·거리·혼잡·기온을 한 화면에서. 취향을 입력하면 코스가 실시간으로 재배치됩니다.</p>
         <div class="hero-search">
           <span class="search-icon" aria-hidden="true">⌕</span>
-          <input id="searchInput" type="search" placeholder="어디를 가고 싶나요? (예: 야경, 한옥, 맛집)" aria-label="명소 검색" data-i18n-ph="hero.search" />
-          <button id="searchBtn" class="btn primary" type="button" data-i18n="hero.searchBtn">찾기</button>
+          <input id="searchInput" type="search" placeholder="예: 야경, 한옥, 맛집, 실내" aria-label="명소 검색" data-i18n-ph="hero.search" />
+          <button id="searchBtn" class="btn primary" type="button" data-i18n="hero.searchBtn">탐색</button>
         </div>
         <div class="quick-chips" id="quickChips">
           <button type="button" data-query="야경">🌃 야경</button>
           <button type="button" data-query="한옥">🏯 한옥</button>
           <button type="button" data-query="맛집">🍜 맛집</button>
-          <button type="button" data-query="실내">☔ 비 오는 날</button>
+          <button type="button" data-query="실내">☔ 실내</button>
           <button type="button" data-query="자연">🌳 자연</button>
         </div>
-        <div class="hero-stats">
-          <div><strong id="statSpots">0</strong><span data-i18n="stat.spots">수록 명소</span></div>
-          <div><strong id="statAreas">0</strong><span data-i18n="stat.areas">커버 지역</span></div>
-          <div><strong>2</strong><span data-i18n="stat.langs">지원 언어</span></div>
-        </div>
       </div>
-      <div class="hero-art" aria-hidden="true">
-        <svg viewBox="0 0 520 360" class="skyline">
-          <defs>
-            <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b2d55"/><stop offset="1" stop-color="#0d1424"/></linearGradient>
-            <linearGradient id="river" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1e6f8c"/><stop offset="1" stop-color="#37b6c9"/></linearGradient>
-          </defs>
-          <rect width="520" height="360" rx="28" fill="url(#sky)"/>
-          <circle cx="400" cy="86" r="46" fill="#f7d488" opacity=".16"/>
-          <circle cx="400" cy="86" r="26" fill="#f7d488" opacity=".85"/>
-          <g fill="#20355f">
-            <rect x="40" y="230" width="46" height="80" rx="4"/><rect x="96" y="190" width="38" height="120" rx="4"/>
-            <rect x="150" y="215" width="54" height="95" rx="4"/><rect x="220" y="160" width="34" height="150" rx="4"/>
-            <rect x="268" y="205" width="62" height="105" rx="4"/><rect x="345" y="175" width="40" height="135" rx="4"/>
-            <rect x="400" y="220" width="70" height="90" rx="4"/>
-          </g>
-          <path d="M0 280 Q130 250 260 285 T520 275 L520 360 L0 360Z" fill="url(#river)" opacity=".75"/>
-          <g fill="#9fe8df" opacity=".9">
-            <rect x="104" y="206" width="4" height="4"/><rect x="114" y="206" width="4" height="4"/><rect x="104" y="222" width="4" height="4"/>
-            <rect x="232" y="180" width="4" height="4"/><rect x="232" y="196" width="4" height="4"/><rect x="356" y="192" width="4" height="4"/>
-          </g>
-        </svg>
-        <div class="art-caption">SEOUL · 37.5665° N, 126.9780° E</div>
+      <div class="briefing-metrics">
+        <div class="metric-card">
+          <span class="metric-label" data-i18n="stat.spots">수록 명소</span>
+          <strong id="statSpots">0</strong>
+          <div class="metric-bars" id="metricBars" aria-hidden="true"></div>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label" data-i18n="stat.areas">커버 지역</span>
+          <strong id="statAreas">0</strong>
+          <span class="metric-sub" data-i18n="stat.areaSub">서울 전역 + 근교</span>
+        </div>
+        <div class="metric-card metric-weather">
+          <span class="metric-label" data-i18n="stat.weather">7일 기온 추이</span>
+          <svg id="tempSpark" viewBox="0 0 220 64" role="img" aria-label="7일 기온 스파크라인"></svg>
+          <span class="metric-sub" data-i18n="stat.estimate">계절 추정 · 데모</span>
+        </div>
       </div>
     </section>
 
-    <!-- EXPLORE -->
-    <section id="explore" class="section">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow" data-i18n="explore.eyebrow">EXPLORE SEOUL</p>
-          <h2 data-i18n="explore.title">어디로 갈까요?</h2>
-        </div>
-        <div class="filters" id="filters" role="group" aria-label="카테고리 필터"></div>
-      </div>
-      <div class="explore-grid">
-        <div class="spots-column">
+    <!-- CONSOLE -->
+    <section id="console" class="console">
+      <!-- LEFT RAIL -->
+      <aside class="rail rail-left">
+        <div class="panel rail-panel">
+          <div class="panel-head">
+            <h2><span class="hud-index">01</span><span data-i18n="rail.title">탐색 필터</span></h2>
+            <span class="badge">FILTER</span>
+          </div>
+          <div class="filters" id="filters" role="group" aria-label="카테고리 필터"></div>
           <div class="result-bar">
             <span id="resultCount" aria-live="polite">—</span>
             <div class="result-toggles">
-              <label class="toggle"><input type="checkbox" id="indoorToggle" /><span data-i18n="explore.indoor">실내만 보기</span></label>
-              <label class="toggle"><input type="checkbox" id="outdoorToggle" /><span data-i18n="explore.outdoor">실외만 보기</span></label>
+              <label class="toggle"><input type="checkbox" id="indoorToggle" /><span data-i18n="explore.indoor">실내만</span></label>
+              <label class="toggle"><input type="checkbox" id="outdoorToggle" /><span data-i18n="explore.outdoor">실외만</span></label>
             </div>
           </div>
           <div id="spotList" class="spot-list"></div>
         </div>
+      </aside>
 
-        <aside class="side-column">
-          <div class="panel map-panel">
-            <div class="panel-head"><h3 data-i18n="map.title">서울 지도</h3><span class="badge" data-i18n="map.badge">개략도</span></div>
-            <div class="map-wrap">
-              <svg id="seoulMap" viewBox="0 0 400 300" role="img" aria-label="서울 명소 위치 개략도">
-                <rect x="0" y="0" width="400" height="300" rx="14" class="map-bg" />
-                <g class="map-districts">
-                  <path d="M28 24 H180 V126 H28Z"/><path d="M186 24 H372 V126 H186Z"/>
-                  <path d="M28 190 H180 V276 H28Z"/><path d="M186 190 H372 V276 H186Z"/>
-                </g>
-                <path class="map-river" d="M-10 158 Q80 138 150 162 T270 160 T410 146" />
-                <text x="44" y="60" class="map-label">북부</text>
-                <text x="300" y="60" class="map-label">동부</text>
-                <text x="44" y="232" class="map-label">서남부</text>
-                <text x="300" y="232" class="map-label">동남부</text>
-                <g id="mapMarkers"></g>
-              </svg>
+      <!-- CENTER STAGE -->
+      <section class="stage-wrap">
+        <div class="panel stage-panel">
+          <div class="panel-head stage-head">
+            <h2><span class="hud-index">02</span><span data-i18n="compass.title">서울 컴패스 뷰</span></h2>
+            <div class="stage-tools"><span class="badge" data-i18n="compass.badge">POLAR PLOT</span><span class="live-dot"></span></div>
+          </div>
+
+          <div class="compass-shell">
+            <svg id="seoulMap" viewBox="0 0 600 600" role="img" aria-label="시청 중심 방위·거리 나침반 뷰">
+              <defs>
+                <radialGradient id="compassGlow"><stop offset="0" stop-color="var(--accent)" stop-opacity=".16"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></radialGradient>
+                <linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-3)"/></linearGradient>
+              </defs>
+              <circle cx="300" cy="300" r="280" fill="url(#compassGlow)" />
+              <g id="compassGrid"></g>
+              <g id="routeLayer"></g>
+              <g id="mapMarkers"></g>
+              <g id="needleLayer"></g>
+              <g class="compass-core">
+                <circle cx="300" cy="300" r="19" class="core-ring" />
+                <circle cx="300" cy="300" r="5" class="core-dot" />
+              </g>
+            </svg>
+            <div id="mapCallout" class="map-callout" hidden></div>
+            <div class="compass-legend">
+              <span><i class="legend-dot"></i><span data-i18n="compass.legendSpot">명소</span></span>
+              <span><i class="legend-line"></i><span data-i18n="compass.legendRoute">코스 동선</span></span>
+              <span><i class="legend-center"></i><span data-i18n="compass.legendCenter">시청 기준</span></span>
             </div>
-            <p class="map-note" data-i18n="map.note">위치는 실제 좌표를 개략도에 매핑한 것입니다.</p>
           </div>
 
-          <div class="panel course-panel" id="course">
-            <div class="panel-head"><h3 data-i18n="course.title">내 여행 코스</h3><button id="clearCourse" class="link-btn" type="button" data-i18n="course.clear">비우기</button></div>
-            <ol id="courseList" class="course-list"><li class="empty" data-i18n="course.empty">명소 카드에서 '코스에 담기'를 눌러보세요.</li></ol>
-            <div id="courseSummary" class="course-summary" hidden></div>
-            <button id="recommendBtn" class="btn outline full" type="button" data-i18n="course.recommend">취향으로 코스 추천받기</button>
+          <div class="stage-readout">
+            <div><span data-i18n="compass.bearing">방위</span><strong id="bearingValue">—</strong></div>
+            <div><span data-i18n="compass.distance">거리</span><strong id="distanceValue">—</strong></div>
+            <div><span data-i18n="compass.routeNodes">코스 노드</span><strong id="routeReadout">0</strong></div>
           </div>
-        </aside>
-      </div>
-    </section>
+        </div>
 
-    <!-- GUIDE -->
-    <section id="guide" class="section guide-section">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow" data-i18n="guide.eyebrow">AI CONCIERGE</p>
-          <h2 data-i18n="guide.title">AI 가이드에게 물어보세요</h2>
+        <div class="panel insight-panel" id="insight">
+          <div class="panel-head">
+            <h2><span class="hud-index">03</span><span data-i18n="insight.title">데이터 인사이트</span></h2>
+            <span class="badge" data-i18n="insight.badge">시뮬레이션 지표</span>
+          </div>
+          <div class="insight-grid">
+            <div class="viz-block">
+              <span class="viz-label" data-i18n="viz.category">카테고리 분포</span>
+              <div class="donut-wrap">
+                <svg id="catDonut" viewBox="0 0 140 140" role="img" aria-label="카테고리 분포 도넛 차트"></svg>
+                <div class="donut-center"><strong id="donutTotal">0</strong><small data-i18n="viz.places">SPOTS</small></div>
+              </div>
+              <div id="catLegend" class="viz-legend"></div>
+            </div>
+            <div class="viz-block">
+              <span class="viz-label" id="vizSpotName" data-i18n="viz.profile">선택 명소 프로필</span>
+              <svg id="radarChart" viewBox="0 0 180 180" role="img" aria-label="명소 프로필 레이더 차트"></svg>
+              <div id="radarMeta" class="viz-legend"></div>
+            </div>
+            <div class="viz-block heat-block">
+              <span class="viz-label" data-i18n="viz.heat">시간대 혼잡 히트맵</span>
+              <div id="heatGrid" class="heat-grid" aria-hidden="true"></div>
+              <div class="heat-scale"><span data-i18n="viz.quiet">여유</span><i></i><span data-i18n="viz.busy">붐빔</span></div>
+            </div>
+          </div>
         </div>
-        <span class="badge" data-i18n="guide.badge">로컬 추천 엔진 · 외부 API 불필요</span>
-      </div>
-      <div class="chat-panel">
-        <div id="chatLog" class="chat-log" aria-live="polite"></div>
-        <form id="chatForm" class="chat-form">
-          <input id="chatInput" type="text" autocomplete="off" placeholder="예: 오늘 비 와! 실내 코스 짜줘" aria-label="AI 가이드 메시지" data-i18n-ph="guide.placeholder" />
-          <button class="btn primary" type="submit" data-i18n="guide.send">보내기</button>
-        </form>
-        <div class="chat-suggestions" id="chatSuggestions">
-          <button type="button" data-message="코스 짜줘">코스 짜줘</button>
-          <button type="button" data-message="비 와! 실내로 재조정">비 와! 실내로 재조정</button>
-          <button type="button" data-message="야경 명소 알려줘">야경 명소 알려줘</button>
-          <button type="button" data-message="도움말">도움말</button>
+      </section>
+
+      <!-- RIGHT RAIL -->
+      <aside class="rail rail-right">
+        <div class="panel" id="course">
+          <div class="panel-head">
+            <h2><span class="hud-index">04</span><span data-i18n="course.title">내 여행 코스</span></h2>
+            <button id="clearCourse" class="link-btn" type="button" data-i18n="course.clear">비우기</button>
+          </div>
+          <ol id="courseList" class="course-list"><li class="empty" data-i18n="course.empty">카드를 눌러 코스에 담아보세요.</li></ol>
+          <div id="courseSummary" class="course-summary" hidden></div>
+          <button id="recommendBtn" class="btn outline full" type="button" data-i18n="course.recommend">취향으로 코스 추천받기</button>
         </div>
-      </div>
+
+        <div class="panel" id="guide">
+          <div class="panel-head">
+            <h2><span class="hud-index">05</span><span data-i18n="guide.title">AI 가이드</span></h2>
+            <span class="badge">LOCAL ENGINE</span>
+          </div>
+          <div id="chatLog" class="chat-log" aria-live="polite"></div>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" type="text" autocomplete="off" placeholder="예: 비 와! 실내로 재조정" aria-label="AI 가이드 메시지" data-i18n-ph="guide.placeholder" />
+            <button class="btn primary" type="submit" data-i18n="guide.send">보내기</button>
+          </form>
+          <div class="chat-suggestions" id="chatSuggestions">
+            <button type="button" data-message="코스 짜줘">코스 짜줘</button>
+            <button type="button" data-message="비 와! 실내로 재조정">실내 재조정</button>
+            <button type="button" data-message="야경 명소 알려줘">야경</button>
+            <button type="button" data-message="도움말">도움말</button>
+          </div>
+        </div>
+      </aside>
     </section>
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
       <strong>SEOUL COMPASS AI 2026</strong>
-      <p data-i18n="footer.note">본 사이트는 서울 여행 가이드 개발을 위한 데모 프로젝트입니다. 수록 정보는 예시 데이터이며, 방문 전 반드시 공식 정보를 확인하세요.</p>
-      <p class="footer-meta">Seoul Compass AI 2026 · Demo prototype</p>
+      <p data-i18n="footer.note">본 사이트는 서울 여행 가이드 개발을 위한 데모입니다. 수록 정보와 시각화 지표는 예시 데이터이며, 방문 전 공식 정보를 확인하세요.</p>
+      <p class="footer-meta">POLAR NAVIGATION · DATA VISUALIZATION · LOCAL ENGINE</p>
     </div>
   </footer>
 
@@ -175,6 +211,7 @@
   </div>
 
   <script src="assets/data.js"></script>
+  <script src="assets/viz.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>
