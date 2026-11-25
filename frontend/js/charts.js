@@ -2,13 +2,14 @@
 (function (global) {
   'use strict';
 
+  // 절제된 라이트 톤: 골드·네이비·세이지 기반의 고급 팔레트
   const COLORS = {
-    hiking:'#7cd992', shower:'#58c8ff', meeting:'#ffa657', restaurant:'#ff6b8a',
-    bowling:'#b58cff', international_tourism_area:'#4fe0c4', subway_station:'#6aa8ff',
-    shopping:'#ffc857', attraction:'#ff8fb1', night_view:'#9b7bff', park:'#5fd99b',
-    cafe:'#ffb38a', culture:'#c69cff', bar:'#ff7a7a'
+    hiking:'#4f9d69', shower:'#4a8fb8', meeting:'#c07a3c', restaurant:'#b45f54',
+    bowling:'#7d6bb5', international_tourism_area:'#2f8f83', subway_station:'#5479b0',
+    shopping:'#b8914e', attraction:'#a86a8f', night_view:'#6b5ba8', park:'#5d9b6f',
+    cafe:'#b8805e', culture:'#8a76ad', bar:'#a85a55'
   };
-  const SECTOR_COLORS = ['#ff6b8a','#ff9f68','#ffd166','#8fe388','#4fe0c4','#5ab0ff','#8a8bff','#cf8bff'];
+  const SECTOR_COLORS = ['#b45f54','#c08a4a','#b8914e','#6f9b6a','#2f8f83','#5479b0','#6b5ba8','#9b6aa0'];
   const NAMES_KO = { hiking:'등산', shower:'샤워', meeting:'약속', restaurant:'식사', bowling:'볼링',
     international_tourism_area:'국제관광', subway_station:'지하철', shopping:'쇼핑', attraction:'명소',
     night_view:'야경', park:'공원', cafe:'카페', culture:'문화', bar:'주점' };
@@ -87,5 +88,82 @@
     container.innerHTML = html + `<div class="heat-scale"><span>여유</span><i></i><span>붐빔</span></div>`;
   }
 
-  global.SeoulCharts = { COLORS, SECTOR_COLORS, NAMES_KO, kpis, donut, bars, heat };
+  /* 색다른 시각화 3종 */
+
+  // 경로 프로필: 방문 노드별 누적 거리/이동시간을 면적 그래프로 표현
+  function routeProfile(container, route) {
+    if (!container) return;
+    const nodes = (route && route.nodes) || [];
+    if (!nodes.length) { container.innerHTML = '<p class="hint">경로를 선택하면 표시됩니다.</p>'; return; }
+    const w = 240, h = 96, pad = 8;
+    let acc = 0;
+    const vals = nodes.map((n) => { acc += n.distance_km || 0; return acc; });
+    const max = Math.max(...vals, 1);
+    const pts = vals.map((v, i) => [pad + i * (w - pad * 2) / Math.max(1, vals.length - 1),
+      h - pad - (v / max) * (h - pad * 2)]);
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+    container.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto">
+      <defs><linearGradient id="profileGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#b8914e" stop-opacity=".42"/><stop offset="1" stop-color="#2f8f83" stop-opacity=".02"/>
+      </linearGradient></defs>
+      <line x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" stroke="rgba(22,35,60,.14)"/>
+      <path d="${line} L${pts[pts.length - 1][0]},${h - pad} L${pad},${h - pad} Z" fill="url(#profileGrad)"/>
+      <path d="${line}" fill="none" stroke="#b8914e" stroke-width="2" stroke-linecap="round"/>
+      ${pts.map((p, i) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="#2f8f83"><title>${i + 1}번지 ${vals[i].toFixed(1)}km</title></circle>`).join('')}
+      </svg><div class="legend">${nodes.map((n, i) => `<span>${i + 1} · ${esc(n.place.name)} ${n.distance_km}km</span>`).join('')}</div>`;
+  }
+
+  // 시간대 리본: 활동별 소요시간을 색 띠로 표시
+  function timelineRibbon(container, schedule) {
+    if (!container) return;
+    const rows = (schedule && schedule.timeline) || [];
+    if (!rows.length) { container.innerHTML = '<p class="hint">일정이 없습니다.</p>'; return; }
+    const total = rows.reduce((s, r) => s + (r.duration_minutes || 60), 0) || 1;
+    container.innerHTML = rows.map((r) => {
+      const pct = Math.max(4, (r.duration_minutes || 60) / total * 100);
+      return `<div style="display:flex;align-items:center;gap:6px;margin:5px 0">
+        <span style="width:70px;font-size:8px;color:var(--muted)">${esc(r.estimated_start)}–${esc(r.estimated_end)}</span>
+        <div style="flex:1;height:14px;background:var(--line);border-radius:7px;overflow:hidden">
+          <div style="width:${pct.toFixed(1)}%;height:100%;background:${COLORS[r.category] || '#b8914e'};opacity:.85"></div>
+        </div><span style="width:54px;font-size:8px;color:var(--muted)">${esc(r.place || '')}</span></div>`;
+    }).join('');
+  }
+
+  // 방향 로즈 차트: 부채꼴과 다른 방사형 막대 표현
+  function rose(container, scores) {
+    if (!container) return;
+    const entries = Object.entries(scores || {});
+    if (!entries.length) { container.innerHTML = '<p class="hint">분석 후 표시됩니다.</p>'; return; }
+    const cx = 80, cy = 80, max = Math.max(...entries.map((e) => e[1]), 1);
+    const bars = entries.map(([name, v], i) => {
+      const deg = i * 45 * Math.PI / 180;
+      const len = 12 + v / max * 52;
+      const x2 = cx + Math.sin(deg) * len, y2 = cy - Math.cos(deg) * len;
+      return `<line x1="${cx}" y1="${cy}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
+        stroke="${SECTOR_COLORS[i % 8]}" stroke-width="9" stroke-linecap="round"><title>${esc(name)} ${v}점</title></line>`;
+    }).join('');
+    container.innerHTML = `<svg viewBox="0 0 160 160" style="width:100%;max-width:160px;display:block;margin:auto">
+      <circle cx="${cx}" cy="${cy}" r="62" fill="none" stroke="var(--line)" stroke-dasharray="2 6"/>
+      ${bars}<circle cx="${cx}" cy="${cy}" r="6" fill="var(--navy)"/></svg>`;
+  }
+
+  // 경로 점수 게이지 (270도 아크)
+  function gauge(container, score) {
+    if (!container) return;
+    const value = Math.max(0, Math.min(100, Number(score || 0)));
+    const r = 42, circ = 2 * Math.PI * r, arc = circ * 0.75;
+    const dash = `${(value / 100 * arc).toFixed(2)} ${(arc - value / 100 * arc).toFixed(2)} ${circ - arc}`;
+    container.innerHTML = `<svg viewBox="0 0 110 110" style="width:110px;height:110px">
+      <circle cx="55" cy="55" r="${r}" fill="none" stroke="var(--line)" stroke-width="9" stroke-linecap="round"
+        stroke-dasharray="${arc} ${circ - arc}" transform="rotate(135 55 55)"/>
+      <circle cx="55" cy="55" r="${r}" fill="none" stroke="url(#gaugeGrad)" stroke-width="9" stroke-linecap="round"
+        stroke-dasharray="${dash}" transform="rotate(135 55 55)"/>
+      <defs><linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#b8914e"/><stop offset="1" stop-color="#2f8f83"/></linearGradient></defs>
+      <text x="55" y="58" text-anchor="middle" font-family="ui-monospace,monospace" font-size="22" font-weight="700" fill="var(--navy)">${value.toFixed(1)}</text>
+      <text x="55" y="72" text-anchor="middle" font-size="8" fill="var(--muted)">ROUTE SCORE</text>
+    </svg>`;
+  }
+
+  global.SeoulCharts = { COLORS, SECTOR_COLORS, NAMES_KO, kpis, donut, bars, heat, routeProfile, timelineRibbon, rose, gauge };
 })(window);

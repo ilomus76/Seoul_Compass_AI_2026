@@ -89,6 +89,10 @@
     const routeScores = {};
     state.routes.forEach((r, i) => { routeScores[`${i + 1}위`] = r.score; });
     SeoulCharts.bars($('routeQuality'), routeScores);
+    SeoulCharts.rose($('directionRose'), scores);
+    SeoulCharts.routeProfile($('routeProfile'), state.selectedRoute);
+    SeoulCharts.timelineRibbon($('timelineRibbon'), state.selectedRoute && state.selectedRoute.schedule);
+    SeoulCharts.gauge($('scoreGauge'), state.selectedRoute && state.selectedRoute.score);
   }
 
   async function post(path, body) {
@@ -306,7 +310,7 @@
   $('mapModePolar').addEventListener('click', () => { state.mapMode = 'polar'; renderCurrentMap(); });
 
   // 테마 전환 (라이트/다크)
-  const savedTheme = localStorage.getItem('sc-theme') || 'dark';
+  const savedTheme = localStorage.getItem('sc-theme') || 'light';
   document.body.dataset.theme = savedTheme;
   $('themeBtn').textContent = savedTheme === 'dark' ? '◐ 다크' : '☀ 라이트';
   $('themeBtn').addEventListener('click', () => {
@@ -314,6 +318,16 @@
     document.body.dataset.theme = next;
     localStorage.setItem('sc-theme', next);
     $('themeBtn').textContent = next === 'dark' ? '◐ 다크' : '☀ 라이트';
+  });
+
+  // 상단 탭: 우측 결과 영역을 전환한다.
+  document.querySelectorAll('.view-tabs button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const view = btn.dataset.view;
+      document.body.dataset.view = view;
+      document.querySelectorAll('.view-tabs button').forEach((b) => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.view-panel').forEach((p) => { p.hidden = p.dataset.panel !== view; });
+    });
   });
 
   // 입력 화면과 설정 화면의 가중치 slider 연동

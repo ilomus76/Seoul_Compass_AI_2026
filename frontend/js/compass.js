@@ -17,7 +17,7 @@
     const cx = 300, cy = 300, maxR = 245;
     const radius = Math.max(1, Number(data.radius_km || 5));
     const sectorColors = C.SECTOR_COLORS.length ? C.SECTOR_COLORS
-      : ['#ff6b8a','#ff9f68','#ffd166','#8fe388','#4fe0c4','#5ab0ff','#8a8bff','#cf8bff'];
+      : ['#b45f54','#c08a4a','#b8914e','#6f9b6a','#2f8f83','#5479b0','#6b5ba8','#9b6aa0'];
     const categoryColors = C.COLORS || {};
 
     const sectors = NAMES.map((name, i) => {
@@ -46,9 +46,9 @@
     const markers = places.map((p) => {
       const r = Math.min(maxR, (p.distance_km / radius) * maxR);
       const [x, y] = point(cx, cy, r, p.bearing || 0);
-      const color = categoryColors[p.category] || '#ff8fb1';
+      const color = categoryColors[p.category] || '#a86a8f';
       return `<g class="marker" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">
-        <circle r="9" fill="${color}" opacity=".16"/><circle r="4.5" fill="${color}" stroke="#070b16" stroke-width="1.2"/>
+        <circle r="9" fill="${color}" opacity=".16"/><circle r="4.5" fill="${color}" stroke="#f5f2eb" stroke-width="1.2"/>
         <text x="9" y="-7" fill="#eef3ff" font-size="9">${esc(p.name)}</text>
         <title>${esc(p.name)} · ${esc(p.direction || '')} · ${p.distance_km}km · ${p.score || 0}점</title></g>`;
     }).join('');
@@ -65,14 +65,14 @@
 
     container.innerHTML = `<svg viewBox="0 0 600 600" role="img" aria-label="360도 방향 분석 지도">
       <defs><linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#4fe0c4"/><stop offset="0.5" stop-color="#ffc857"/><stop offset="1" stop-color="#ff6b8a"/>
+        <stop offset="0" stop-color="#b8914e"/><stop offset="0.5" stop-color="#2f8f83"/><stop offset="1" stop-color="#b45f54"/>
       </linearGradient></defs>
       ${sectors}${rings}
       <line x1="${cx}" y1="24" x2="${cx}" y2="576" stroke="rgba(255,255,255,.12)"/>
       <line x1="24" y1="${cy}" x2="576" y2="${cy}" stroke="rgba(255,255,255,.12)"/>
       ${labels}${routePath}${routeNodes}${markers}
       <circle class="start-pulse" cx="${cx}" cy="${cy}" r="10"/>
-      <circle cx="${cx}" cy="${cy}" r="9" fill="#4fe0c4" stroke="#070b16" stroke-width="2"/>
+      <circle cx="${cx}" cy="${cy}" r="9" fill="#b8914e" stroke="#f5f2eb" stroke-width="2"/>
       <text x="${cx + 14}" y="${cy + 4}" fill="#eef3ff" font-size="10">출발지</text>
     </svg>`;
 
@@ -104,7 +104,7 @@
     const route = data.route || null;
     const extent = 275;
     const sectorColors = C.SECTOR_COLORS.length ? C.SECTOR_COLORS
-      : ['#ff6b8a','#ff9f68','#ffd166','#8fe388','#4fe0c4','#5ab0ff','#8a8bff','#cf8bff'];
+      : ['#b45f54','#c08a4a','#b8914e','#6f9b6a','#2f8f83','#5479b0','#6b5ba8','#9b6aa0'];
 
     // 지도 배경: 격자 + 한강 + 자치구 라벨
     const grid = [0.2, 0.4, 0.6, 0.8].map((k) => `
@@ -142,34 +142,38 @@
       <text class="map-label" x="305" y="${(300 - extent * k - 4).toFixed(0)}">${(radius * k).toFixed(1)}km</text>`).join('');
     const dirs = NAMES.map((name, i) => {
       const [x, y] = point(300, 300, extent + 14, i * 45);
-      return `<text x="${x.toFixed(0)}" y="${y.toFixed(0)}" text-anchor="middle" fill="${sectorColors[i % 8]}" font-size="10" font-weight="700">${name}</text>`;
+      const score = Number(scores[name] || 0);
+      return `<text x="${x.toFixed(0)}" y="${y.toFixed(0)}" text-anchor="middle" fill="${sectorColors[i % 8]}" font-size="10" font-weight="700">${name} ${score}점</text>`;
     }).join('');
 
     const markers = places.map((p) => {
       const q = geoProject(p.lat, p.lng, center, radius, extent);
-      const color = (C.COLORS || {})[p.category] || '#ff8fb1';
+      const color = (C.COLORS || {})[p.category] || '#a86a8f';
       return `<g class="marker" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})">
-        <circle r="8" fill="${color}" opacity=".16"/><circle r="4" fill="${color}" stroke="#070b16"/>
+        <circle r="8" fill="${color}" opacity=".16"/><circle r="4" fill="${color}" stroke="#f5f2eb"/>
         <text x="8" y="-7">${esc(p.name)}</text><title>${esc(p.name)} · ${p.distance_km}km · ${p.score || 0}점</title></g>`;
     }).join('');
 
     const nodes = route && route.nodes ? route.nodes : [];
     const pts = nodes.map((n) => geoProject(n.place.lat, n.place.lng, center, radius, extent));
+    const pointString = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
     const routePath = pts.length > 1
-      ? `<polyline class="route-line" points="${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}"/>` : '';
+      ? `<polyline class="route-line" points="${pointString}"/>
+         <circle class="flow-dot" r="3.5" fill="#b45f54"><animateMotion dur="3.2s" repeatCount="indefinite"
+           path="M${pointString.replace(/ /g, ' L')}"/></circle>` : '';
     const routeNodes = pts.map((p, i) => `<circle class="route-node" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9"/>
       <text class="route-num" x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}">${i + 1}</text>`).join('');
 
     container.innerHTML = `<svg viewBox="0 0 600 600" role="img" aria-label="지도에 매핑된 360도 방향 분석">
       <defs><linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#4fe0c4"/><stop offset="0.5" stop-color="#ffc857"/><stop offset="1" stop-color="#ff6b8a"/>
+        <stop offset="0" stop-color="#b8914e"/><stop offset="0.5" stop-color="#2f8f83"/><stop offset="1" stop-color="#b45f54"/>
       </linearGradient></defs>
-      <rect x="0" y="0" width="600" height="600" rx="18" fill="rgba(9,15,28,.72)"/>
+      <rect x="0" y="0" width="600" height="600" rx="18" fill="rgba(255,253,249,.80)"/>
       ${grid}${sectors}${rings}
       <path class="map-river" d="${riverPath}"/><text class="map-water-label" x="330" y="300">한강</text>
       ${labels}${dirs}${routePath}${routeNodes}${markers}
       <circle class="start-pulse" cx="300" cy="300" r="10"/>
-      <circle cx="300" cy="300" r="9" fill="#4fe0c4" stroke="#070b16" stroke-width="2"/>
+      <circle cx="300" cy="300" r="9" fill="#b8914e" stroke="#f5f2eb" stroke-width="2"/>
       <text class="map-label" x="314" y="304">출발지</text>
     </svg>`;
 
