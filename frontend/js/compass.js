@@ -63,7 +63,7 @@
     const routeNodes = pts.map((p, i) => `<circle class="route-node" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="9"/>
       <text class="route-num" x="${p[0].toFixed(1)}" y="${(p[1] + 3).toFixed(1)}">${i + 1}</text>`).join('');
 
-    container.innerHTML = `<svg viewBox="0 0 600 600" role="img" aria-label="360도 방향 분석 지도">
+    container.innerHTML = `<svg viewBox="0 0 600 600" preserveAspectRatio="xMidYMid slice" role="img" aria-label="360도 방향 분석 지도">
       <defs><linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stop-color="#b8914e"/><stop offset="0.5" stop-color="#2f8f83"/><stop offset="1" stop-color="#b45f54"/>
       </linearGradient></defs>
@@ -164,11 +164,11 @@
     const routeNodes = pts.map((p, i) => `<circle class="route-node" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9"/>
       <text class="route-num" x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}">${i + 1}</text>`).join('');
 
-    container.innerHTML = `<svg viewBox="0 0 600 600" role="img" aria-label="지도에 매핑된 360도 방향 분석">
+    container.innerHTML = `<svg viewBox="0 0 600 600" preserveAspectRatio="xMidYMid slice" role="img" aria-label="지도에 매핑된 360도 방향 분석">
       <defs><linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stop-color="#b8914e"/><stop offset="0.5" stop-color="#2f8f83"/><stop offset="1" stop-color="#b45f54"/>
       </linearGradient></defs>
-      <rect x="0" y="0" width="600" height="600" rx="18" fill="rgba(255,253,249,.80)"/>
+      <rect x="0" y="0" width="600" height="600" rx="18" style="fill:var(--panel)" opacity=".9"/>
       ${grid}${sectors}${rings}
       <path class="map-river" d="${riverPath}"/><text class="map-water-label" x="330" y="300">한강</text>
       ${labels}${dirs}${routePath}${routeNodes}${markers}

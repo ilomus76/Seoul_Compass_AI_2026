@@ -320,6 +320,13 @@
     $('themeBtn').textContent = next === 'dark' ? '◐ 다크' : '☀ 라이트';
   });
 
+  // 입력 패널 접기/펼치기
+  $('briefToggle').addEventListener('click', () => {
+    const panel = $('briefPanel');
+    panel.classList.toggle('collapsed');
+    $('briefToggle').textContent = panel.classList.contains('collapsed') ? '+' : '−';
+  });
+
   // 상단 탭: 우측 결과 영역을 전환한다.
   document.querySelectorAll('.view-tabs button').forEach((btn) => {
     btn.addEventListener('click', () => {
