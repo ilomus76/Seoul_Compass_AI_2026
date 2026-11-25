@@ -38,7 +38,10 @@ def validate_schedule(activities: List[Dict], route: Dict,
     cursor = None
 
     for i, activity in enumerate(activities):
-        start = to_minutes(activity.get("start_time"))
+        # 고정 시간이 없으면 희망 시간(earliest/preferred)을 시작 기준으로 사용한다.
+        start = (to_minutes(activity.get("start_time"))
+                 or to_minutes(activity.get("earliest_start"))
+                 or to_minutes(activity.get("preferred_time")))
         place = nodes[i]["place"] if i < len(nodes) else {}
         duration = int(activity.get("duration_minutes") or 60)
         arrive = cursor if cursor is not None else start

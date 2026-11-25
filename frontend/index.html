@@ -3,12 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Seoul Compass AI — 서울 컴파스 AI</title>
+  <title>Seoul Compass AI — 관측 데스크</title>
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body data-theme="light">
+  <!-- 상단: 인라인 질문 -->
   <header class="topbar">
-    <div class="brand">SEOUL <b>COMPASS</b> AI <span>v1.0 · IMMERSIVE MAP</span></div>
+    <div class="brand">SEOUL <b>COMPASS</b> AI <span>v1.0 · OBSERVATORY</span></div>
+    <form id="quickForm" class="quick-form">
+      <select id="voiceLang" aria-label="음성/입력 언어">
+        <option value="ko-KR">한국어</option><option value="en-US">English</option>
+        <option value="ja-JP">日本語</option><option value="zh-CN">中文</option>
+      </select>
+      <button id="micBtn" class="ghost" type="button" title="음성으로 입력">🎤 음성</button>
+      <input id="question" type="text" placeholder="예: 오후2시부터 4시까지 쇼핑 / 9시 관악산 등산, 14시 신림역 약속" />
+      <button id="analyzeBtn" class="primary" type="submit">분석</button>
+    </form>
     <div class="top-actions">
       <button id="mapModeGeo" class="ghost active" type="button">지도</button>
       <button id="mapModePolar" class="ghost" type="button">컴패스</button>
@@ -16,38 +26,34 @@
     </div>
   </header>
 
-  <main class="immersive">
-    <!-- 전체 화면 지도 -->
-    <section id="map" class="map-stage">
-      <div id="compass" class="compass"></div>
-      <div class="map-caption">
-        <span class="dot"></span> 서울 시청 기준 · 360도 스캔
-      </div>
-    </section>
-
-    <!-- 좌상단: 입력 플로팅 패널 -->
-    <aside id="briefPanel" class="float-panel brief-panel">
-      <div class="panel-head">
-        <div><p class="eyebrow">MISSION BRIEF</p><h1>어디로 갈까요?</h1></div>
-        <button id="briefToggle" class="collapse-btn" type="button" title="접기/펼치기">−</button>
-      </div>
-      <div class="panel-body">
-        <label for="question">자연어 일정</label>
-        <textarea id="question" rows="3" placeholder="예: 오후2시부터 4시까지 쇼핑 / 9시 관악산 등산, 14시 신림역 약속"></textarea>
-        <div class="grid-form">
-          <div><label for="radius">반경(km)</label><select id="radius"><option>1</option><option>3</option><option selected>5</option><option>10</option></select></div>
-          <div><label for="date">날짜</label><input id="date" type="date" /></div>
-          <div><label for="lat">위도</label><input id="lat" type="number" step="0.0001" value="37.5665" /></div>
-          <div><label for="lng">경도</label><input id="lng" type="number" step="0.0001" value="126.9780" /></div>
+  <main class="observatory">
+    <!-- 좌측 레일 -->
+    <aside class="rail-left">
+      <nav class="rail-nav" aria-label="섹션 이동">
+        <button type="button" data-view="console" class="active" title="탐색">⌕<small>탐색</small></button>
+        <button type="button" data-view="plan" title="일정">▤<small>일정</small></button>
+        <button type="button" data-view="archive" title="기록">◷<small>기록</small></button>
+        <button type="button" data-view="settings" title="설정">⚙<small>설정</small></button>
+      </nav>
+      <div class="rail-body">
+        <p class="eyebrow">START POINT</p>
+        <div class="gps-box">
+          <div class="row"><button id="geoBtn" class="primary full" type="button">◎ 현재 위치 사용</button></div>
+          <div class="row"><button id="gpsWatchBtn" class="ghost full" type="button">실시간 추적 시작</button></div>
+          <p id="gpsStatus" class="gps-status">GPS 대기 · 위치 권한 필요</p>
         </div>
         <div class="grid-form">
-          <div><label for="locationName">출발지</label><input id="locationName" value="서울시청" /></div>
+          <div><label for="lat">위도</label><input id="lat" type="number" step="0.0001" value="37.5665" /></div>
+          <div><label for="lng">경도</label><input id="lng" type="number" step="0.0001" value="126.9780" /></div>
+          <div><label for="radius">반경(km)</label><select id="radius"><option>1</option><option>3</option><option selected>5</option><option>10</option></select></div>
+          <div><label for="date">날짜</label><input id="date" type="date" /></div>
+          <div><label for="locationName">출발지 이름</label><input id="locationName" value="서울시청" /></div>
           <div><label for="budget">예산(원)</label><input id="budget" type="number" value="50000" /></div>
-          <div style="grid-column:1/-1"><label>이동수단</label>
-            <label class="check"><input type="checkbox" class="mode" value="walking" checked />도보</label>
-            <label class="check"><input type="checkbox" class="mode" value="bus" checked />버스</label>
-            <label class="check"><input type="checkbox" class="mode" value="subway" checked />지하철</label>
-          </div>
+        </div>
+        <div><label>이동수단</label>
+          <label class="check"><input type="checkbox" class="mode" value="walking" checked />도보</label>
+          <label class="check"><input type="checkbox" class="mode" value="bus" checked />버스</label>
+          <label class="check"><input type="checkbox" class="mode" value="subway" checked />지하철</label>
         </div>
         <details><summary>관심사 가중치</summary>
           <div class="grid-form">
@@ -57,32 +63,36 @@
             <div>V <input id="wV" type="range" min="0" max="100" value="15" /></div>
           </div>
         </details>
-        <div class="row"><button id="geoBtn" class="ghost" type="button">현재 위치</button><button id="analyzeBtn" class="primary" type="button">분석 시작</button></div>
         <p id="parseWarnings" class="warn"></p>
       </div>
     </aside>
 
-    <!-- 우측: 결과 플로팅 패널 (탭) -->
-    <aside class="float-panel result-panel">
-      <nav class="view-tabs">
-        <button type="button" data-view="console" class="active">시각화</button>
-        <button type="button" data-view="plan">일정·경로</button>
-        <button type="button" data-view="archive">기록·설정</button>
-      </nav>
-      <div class="result-scroll">
+    <!-- 중앙: 지도 -->
+    <section id="map" class="map-stage">
+      <div id="compass" class="compass"></div>
+      <div class="map-caption"><span class="dot"></span><span id="mapCaption">서울 시청 기준 · 360도 스캔</span></div>
+      <div id="compassLegend" class="compass-legend"></div>
+    </section>
+
+    <!-- 우측: 인사이트 -->
+    <aside class="rail-right">
+      <div class="insight-head"><p class="eyebrow">INSIGHT PANEL</p><h2 id="insightTitle">시각화</h2></div>
+      <div class="insight-scroll">
         <div class="view-panel" data-panel="console">
           <div id="kpiGrid" class="kpi-grid"></div>
           <div class="chart-box"><div class="chart-title">업종 분포</div><div id="categoryDonut"></div></div>
-          <div class="chart-box"><div class="chart-title">방향 로즈</div><div id="directionRose"></div></div>
-          <div class="chart-box"><div class="chart-title">방향 점수</div><div id="scoreBars"></div></div>
+          <div class="chart-box"><div class="chart-title">방향 오빗 링</div><div id="directionOrbit"></div></div>
+          <div class="chart-box"><div class="chart-title">방향 로즈 · 점수</div><div id="directionRose"></div><div id="scoreBars"></div><div id="directionScores" class="score-list"></div></div>
+          <div class="chart-box"><div class="chart-title">TOP3 경로 비교 레이더</div><div id="routeRadar"></div></div>
+          <div class="chart-box"><div class="chart-title">이동 흐름도</div><div id="flowRibbon"></div></div>
           <div class="chart-box"><div class="chart-title">경로 프로필</div><div id="routeProfile"></div></div>
-          <div class="chart-box"><div class="chart-title">경로 품질</div><div id="routeQuality"></div></div>
-          <div class="chart-box"><div class="chart-title">혼잡 히트맵 (예시)</div><div id="crowdHeat" class="heat-grid"></div></div>
+          <div class="chart-box"><div class="chart-title">혼잡 호라이즌 · 히트맵</div><div id="crowdHorizon"></div><div id="crowdHeat" class="heat-grid"></div></div>
+          <div class="chart-box"><div class="chart-title">경로 품질 추이</div><div id="routeQuality"></div><div id="scoreGauge" class="gauge-box"></div></div>
         </div>
         <div class="view-panel" data-panel="plan" hidden>
           <section id="schedule" class="inner-section">
             <div class="section-head"><p class="eyebrow">ITINERARY</p><h2>시간대별 일정표</h2></div>
-            <p class="hint">행을 누르면 상세·시간 수정·장소 변경이 가능합니다.</p>
+            <p class="hint">행 선택 시 상세·시간 수정·장소 변경 가능</p>
             <div class="table-wrap"><table id="scheduleTable"><thead><tr><th>활동</th><th>장소</th><th>계획</th><th>예상 시작</th><th>예상 종료</th><th>고정</th></tr></thead><tbody></tbody></table></div>
             <p id="conflicts" class="warn"></p>
             <div id="scheduleDetail" class="detail-panel" hidden></div>
@@ -92,7 +102,7 @@
             <div id="routeList" class="route-list"></div>
           </section>
           <section id="report" class="inner-section">
-            <div class="section-head"><div><p class="eyebrow">EXPECTATION</p><h2>기대치 리포트</h2></div><div id="scoreGauge" class="gauge-box"></div></div>
+            <div class="section-head"><p class="eyebrow">EXPECTATION</p><h2>기대치 리포트</h2></div>
             <div id="reportBody" class="report"></div>
           </section>
         </div>
@@ -103,9 +113,11 @@
             <div id="tripList" class="trip-list"></div>
             <div id="visitPanel" class="detail-panel" hidden></div>
           </section>
+        </div>
+        <div class="view-panel" data-panel="settings" hidden>
           <section id="settings" class="inner-section">
             <div class="section-head"><p class="eyebrow">PREFERENCES</p><h2>설정</h2></div>
-            <div class="chart-box"><div class="chart-title">관심사 가중치</div>
+            <div class="chart-box"><div class="chart-title">가중치 (입력 레일과 연동)</div>
               <div class="grid-form">
                 <div>M <input id="swM" type="range" min="0" max="100" value="40" /></div>
                 <div>D <input id="swD" type="range" min="0" max="100" value="25" /></div>
@@ -118,14 +130,17 @@
         </div>
       </div>
     </aside>
-
-    <!-- 하단: 방향 점수 + 시간대 리본 -->
-    <div class="float-panel bottom-panel">
-      <div class="bottom-left"><span class="caption">방향 점수</span><div id="directionScores" class="score-list"></div></div>
-      <div class="bottom-right"><span class="caption">시간대 리본</span><div id="timelineRibbon" class="ribbon"></div></div>
-      <div id="compassLegend" class="compass-legend"></div>
-    </div>
   </main>
+
+  <!-- 하단: 타임라인 스크러버 -->
+  <div class="scrubber">
+    <button id="scrubPlay" class="primary" type="button">▶ 재생</button>
+    <div class="scrub-main">
+      <div class="scrub-head"><span id="scrubTime">09:00</span><span id="scrubLabel">일정을 분석하면 타임라인이 생성됩니다.</span></div>
+      <input id="scrubSlider" type="range" min="0" max="100" value="0" />
+      <div id="timelineRibbon" class="ribbon"></div>
+    </div>
+  </div>
 
   <div id="toast" class="toast" hidden></div>
   <script src="/js/charts.js"></script>

@@ -44,6 +44,12 @@ def recommend_routes(request: Dict) -> List[Dict]:
     for act in activities:
         words = act.get("keywords", []) + [act.get("category", "")]
         places = find_by_keywords(words, lat, lng, radius, limit=BEAM_WIDTH)
+        # 업종(category)으로도 검색해 다국어 키워드 누락을 보완한다.
+        by_category = search_places(lat, lng, radius, category=act.get("category"), limit=BEAM_WIDTH)
+        merged = {p["id"]: p for p in places}
+        for p in by_category:
+            merged.setdefault(p["id"], p)
+        places = sorted(merged.values(), key=lambda p: p["distance_km"])[:BEAM_WIDTH]
         if not places and act.get("location"):
             places = search_places(lat, lng, radius, keyword=act["location"], limit=BEAM_WIDTH)
         # AGENTS.md 9.4: 필수 활동 후보가 없으면 탐색 반경을 확장한다.

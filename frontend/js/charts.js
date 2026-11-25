@@ -19,6 +19,7 @@
   function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return Math.abs(h); }
 
   function spark(values, color) {
+    if (!values || !values.length) return '';
     const w = 120, h = 32, min = Math.min(...values, 0), max = Math.max(...values, 1);
     const pts = values.map((v, i) => [i * w / Math.max(1, values.length - 1), h - (v - min) / (max - min || 1) * (h - 4) - 2]);
     const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
@@ -165,5 +166,91 @@
     </svg>`;
   }
 
-  global.SeoulCharts = { COLORS, SECTOR_COLORS, NAMES_KO, kpis, donut, bars, heat, routeProfile, timelineRibbon, rose, gauge };
+  /* 관측 데스크용 고급 시각화 */
+
+  // TOP3 경로를 4개 축으로 겹쳐 비교하는 레이더
+  function routeRadar(container, routes) {
+    if (!container) return;
+    if (!routes || !routes.length) { container.innerHTML = '<p class="hint">분석 후 표시됩니다.</p>'; return; }
+    const axes = ['관심사', '시간', '비용', '품질'];
+    const cx = 90, cy = 90, R = 58;
+    const pt = (i, v) => {
+      const a = (-90 + i * 90) * Math.PI / 180;
+      return [cx + R * v * Math.cos(a), cy + R * v * Math.sin(a)];
+    };
+    const rings = [0.25, 0.5, 0.75, 1].map((k) => `<polygon points="${[0,1,2,3].map(i=>pt(i,k).map(n=>n.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="var(--line)"/>`).join('');
+    const colors = ['#b8914e', '#2f8f83', '#b45f54'];
+    const shapes = routes.slice(0, 3).map((r, idx) => {
+      const vals = [
+        Math.min(1, r.score / 100),
+        Math.max(0.15, 1 - r.total_travel_minutes / 400),
+        Math.max(0.15, 1 - r.estimated_cost_krw / 100000),
+        Math.min(1, r.data_confidence || 0)
+      ];
+      return `<polygon points="${vals.map((v,i)=>pt(i,v).map(n=>n.toFixed(1)).join(',')).join(' ')}"
+        fill="${colors[idx]}" fill-opacity=".10" stroke="${colors[idx]}" stroke-width="1.6">
+        <title>${idx+1}위 경로 ${r.score}점</title></polygon>`;
+    }).join('');
+    const labels = axes.map((a,i)=>{ const [x,y]=pt(i,1.22); return `<text x="${x.toFixed(0)}" y="${y.toFixed(0)}" text-anchor="middle" font-size="8" fill="var(--muted)">${a}</text>`; }).join('');
+    container.innerHTML = `<svg viewBox="0 0 180 180" style="width:100%;max-width:180px;display:block;margin:auto">${rings}${shapes}${labels}</svg>
+      <div class="legend">${routes.slice(0,3).map((r,i)=>`<span><i style="background:${colors[i]}"></i>${i+1}위 ${r.score}점</span>`).join('')}</div>`;
+  }
+
+  // 활동 간 이동 흐름도 (단순 새니키 리본)
+  function flowRibbon(container, route) {
+    if (!container) return;
+    const nodes = (route && route.nodes) || [];
+    if (nodes.length < 2) { container.innerHTML = '<p class="hint">경로가 없습니다.</p>'; return; }
+    const w = 260, h = 110, pad = 8;
+    const segs = nodes.slice(1).map((n, i) => {
+      const prev = nodes[i];
+      const y = pad + i * (h - pad * 2) / Math.max(1, nodes.length - 2);
+      const thickness = Math.max(6, Math.min(24, (n.distance_km || 0) * 3));
+      return { y, thickness, name: `${prev.place.name} → ${n.place.name}`, km: n.distance_km };
+    });
+    container.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto">
+      ${segs.map((s,i)=>`<path d="M${pad} ${s.y} C${w/2} ${s.y - 10} ${w/2} ${s.y + 12} ${w-pad} ${s.y + s.thickness}"
+        fill="none" stroke="${SECTOR_COLORS[i % 8]}" stroke-width="${s.thickness}" opacity=".35" stroke-linecap="round">
+        <title>${esc(s.name)} · ${s.km}km</title></path>`).join('')}
+      </svg><div class="legend">${segs.map(s=>`<span>${esc(s.name)} ${s.km}km</span>`).join('')}</div>`;
+  }
+
+  // 시간대 혼잡 호라이즌 차트 (겹친 면적 그래프)
+  function horizon(container, route) {
+    if (!container) return;
+    const key = route ? route.nodes.map(n=>n.place.id).join('-') : 'default';
+    const layers = [0, 1, 2].map((layer) => {
+      const vals = Array.from({ length: 12 }, (_, i) => (hash(key + layer + i) % 100));
+      const pts = vals.map((v, i) => [i * 260 / 11, 70 - (v / 100) * (46 - layer * 10)]);
+      const line = pts.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+      return `<path d="${line} L260,70 L0,70 Z" fill="${['#2f8f83','#b8914e','#b45f54'][layer]}" opacity="${0.34 - layer*0.06}"/>`;
+    }).join('');
+    container.innerHTML = `<svg viewBox="0 0 260 76" style="width:100%;height:auto">
+      <line x1="0" y1="70" x2="260" y2="70" stroke="var(--line)"/>${layers}</svg>
+      <div class="legend"><span>08시</span><span>13시</span><span>19시</span></div>`;
+  }
+
+  // 방향 오빗 링: 회전하는 세그먼트 링
+  function orbit(container, scores) {
+    if (!container) return;
+    const entries = Object.entries(scores || {});
+    if (!entries.length) { container.innerHTML = '<p class="hint">분석 후 표시됩니다.</p>'; return; }
+    const cx = 80, cy = 80;
+    const segs = entries.map(([name, v], i) => {
+      const a0 = i * 45 + 2, a1 = a0 + 41;
+      const r0 = 36, r1 = r0 + Math.max(4, v / 90 * 32);
+      const p = (r,a)=>[cx+r*Math.cos(a*Math.PI/180), cy+r*Math.sin(a*Math.PI/180)];
+      const [x0,y0]=p(r0,a0), [x1,y1]=p(r1,a0), [x2,y2]=p(r1,a1), [x3,y3]=p(r0,a1);
+      return `<path d="M${x0.toFixed(1)},${y0.toFixed(1)} L${x1.toFixed(1)},${y1.toFixed(1)} A${r1},${r1} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)} L${x3.toFixed(1)},${y3.toFixed(1)} Z"
+        fill="${SECTOR_COLORS[i%8]}" opacity=".78"><title>${esc(name)} ${v}점</title></path>`;
+    }).join('');
+    container.innerHTML = `<svg viewBox="0 0 160 160" style="width:100%;max-width:160px;display:block;margin:auto">
+      <circle cx="${cx}" cy="${cy}" r="30" fill="none" stroke="var(--line)" stroke-dasharray="2 5"/>
+      <g style="transform-origin:80px 80px;animation:spin 26s linear infinite">${segs}</g>
+      <circle cx="${cx}" cy="${cy}" r="4" fill="var(--gold)"/>
+      <text x="${cx}" y="${cy-38}" text-anchor="middle" font-size="8" fill="var(--muted)">N</text>
+      </svg><style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+  }
+
+  global.SeoulCharts = { COLORS, SECTOR_COLORS, NAMES_KO, kpis, donut, bars, heat, routeProfile, timelineRibbon, rose, gauge, routeRadar, flowRibbon, horizon, orbit };
 })(window);
