@@ -202,6 +202,26 @@ def safety_help(payload: Dict) -> Dict:
                               float(payload.get("radius_km", 5.0)))
 
 
+@app.get("/api/kakao/check")
+def kakao_check() -> Dict:
+    """카카오맵 SDK 키/도메인 상태 진단 (키 값은 노출하지 않음)."""
+    if not KAKAO_JAVASCRIPT_KEY:
+        return {"ok": False, "status": "no_key", "message": "KAKAO_JAVASCRIPT_KEY가 비어 있습니다."}
+    import urllib.error
+    import urllib.request
+    url = f"https://dapi.kakao.com/v2/maps/sdk.js?appkey={KAKAO_JAVASCRIPT_KEY}&autoload=false"
+    req = urllib.request.Request(url, headers={"Referer": "http://127.0.0.1:9200"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as res:
+            return {"ok": res.status == 200, "status": res.status,
+                    "message": "SDK 로드 가능" if res.status == 200 else "SDK 응답 오류"}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "status": exc.code,
+                "message": "401: JavaScript 키가 아니거나 등록 도메인이 일치하지 않습니다." if exc.code == 401 else "SDK 요청 실패"}
+    except Exception as exc:
+        return {"ok": False, "status": "network_error", "message": str(exc)[:120]}
+
+
 @app.get("/api/config")
 def frontend_config() -> Dict:
     """프론트 설정: 카카오맵 키 존재 여부만 노출한다."""
