@@ -12,7 +12,7 @@
     watchId: null, scrubTimer: null, voice: null, listening: false,
     density: null, transport: null, alarms: [], chat: [], weather: null,
     sim: { playing:false, progress:0, speed:1, mode:'walking', timer:null, logged:-1 },
-    kakaoKey: null
+    kakaoKey: null, kakaoFailed: false
   };
   let lastPlaces = [], lastScores = [];
   let reportCache = {};
@@ -48,8 +48,15 @@
       radius_km: Number($('radius').value) || 5,
       places: lastPlaces, scores: lastScores, route: state.selectedRoute, routes: state.routes
     };
-    if (state.kakaoKey && state.mapMode === 'geo') {
-      SeoulMapHelper.useKakaoMap($('compass'), state.kakaoKey, payload.start, payload);
+    if (state.kakaoKey && state.mapMode === 'geo' && !state.kakaoFailed) {
+      SeoulMapHelper.useKakaoMap($('compass'), state.kakaoKey, payload.start, payload, (msg) => {
+        state.kakaoFailed = true;
+        SeoulCompassMap.renderGeo($('compass'), payload);
+        applySimMarker();
+        const badge = document.getElementById('mapProviderBadge');
+        if (badge) badge.textContent = '카카오 로드 실패 → SVG';
+        toast(msg);
+      });
     } else if (state.mapMode === 'geo') SeoulCompassMap.renderGeo($('compass'), payload);
     else SeoulCompassMap.render($('compass'), payload);
     applySimMarker();

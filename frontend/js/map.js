@@ -86,12 +86,14 @@
     });
   }
 
-  function useKakaoMap(container, key, center, data) {
+  function useKakaoMap(container, key, center, data, onFallback) {
     if (!key || !container) return false;
     const lat = Number(center.latitude) || 37.5665;
     const lng = Number(center.longitude) || 126.9780;
     loadScript(`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`)
-      .then(() => window.kakao.maps.load(() => {
+      .then(() => {
+        if (!window.kakao || !window.kakao.maps) throw new Error('카카오맵 SDK 로드 실패');
+        window.kakao.maps.load(() => {
         const km = window.kakao.maps;
         const pos = new km.LatLng(lat, lng);
         if (!kakaoMap) {
@@ -119,8 +121,8 @@
           const line = new km.Polyline({ path, strokeColor: colors[i % 3], strokeOpacity:.9, strokeWeight:4 });
           line.setMap(kakaoMap); kakaoOverlays.push(line);
         });
-      }))
-      .catch(() => { /* 로드 실패 시 SVG 폴백 유지 */ });
+      })})
+      .catch(() => { if (onFallback) onFallback('카카오맵 로드 실패 → SVG 지도로 전환합니다.'); });
     return true;
   }
 
