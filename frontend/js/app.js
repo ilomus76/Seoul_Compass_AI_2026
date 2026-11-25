@@ -143,11 +143,27 @@
   });
 
   /* ---------- 시각화 ---------- */
+  function renderPlaceList(places) {
+    const box = $('placeListPanel');
+    if (!box) return;
+    $('placeCount').textContent = `${places.length}곳`;
+    box.innerHTML = places.length
+      ? `<table class="place-table"><thead><tr><th>장소</th><th>업종</th><th>거리</th><th>평점</th><th>영업</th><th>요금</th><th>혼잡</th></tr></thead><tbody>
+        ${places.map(p => {
+          const crowd = p.crowd_by_hour ? Math.round(Object.values(p.crowd_by_hour).reduce((a,b)=>a+b,0) / Object.values(p.crowd_by_hour).length) : '-';
+          return `<tr><td><b>${esc(p.name)}</b><br><small>${esc(p.address || '')}</small></td><td>${esc(p.category)}</td>
+            <td>${p.distance_km}km</td><td>★ ${p.rating}</td><td>${esc(p.hours || '-')}</td>
+            <td>${p.fee_krw || 0}원</td><td>${crowd}%</td></tr>`;
+        }).join('')}</tbody></table>`
+      : '<p class="hint">검색 결과가 없습니다.</p>';
+  }
+
   function renderCharts(places, scores) {
     const conflicts = (state.selectedRoute && state.selectedRoute.schedule
       && state.selectedRoute.schedule.conflicts
       && state.selectedRoute.schedule.conflicts.length) || 0;
     SeoulCharts.kpis($('kpiGrid'), { places, routes: state.routes, conflicts, scores });
+    renderPlaceList(places);
     SeoulCharts.donut($('categoryDonut'), places);
     SeoulCharts.orbit($('directionOrbit'), scores);
     SeoulCharts.rose($('directionRose'), scores);
@@ -209,10 +225,20 @@
     <div class="chunk-title">플랜 구조 데이터 <span>${(p.activities || []).length}개 항목</span></div>
     <div class="table-wrap"><table class="plan-table"><thead><tr><th>#</th><th>활동</th><th>날짜</th><th>시간</th><th>장소</th><th>목적</th><th>특이사항</th><th>구분</th></tr></thead>
       <tbody>${planRows}</tbody></table></div>
-    <div class="chunk-title">입력 청크 <span>${(p.chunks || []).length}개</span></div>
-    <div class="chunk-row">${(p.chunks || []).map(c => `<span class="chunk chunk-${esc(c.type)}" title="${esc(c.type)}">
-      <b>${esc(c.type)}</b>${esc(c.text)}<i>→ ${esc(c.value)}</i></span>`).join('') || '<span class="hint">청크 없음</span>'}</div>
-    <div class="detail-actions"><button class="ghost json-toggle" type="button">원본 JSON 보기</button></div>
+    <div class="chunk-title">입력 청크 <span>${(p.chunks || []).length}개 · 클릭하여 편집</span></div>
+    <div class="chunk-row">${(p.chunks || []).map((c, i) => `<button class="chunk chunk-${esc(c.type)} chunk-edit" type="button" data-chunk="${i}" title="${esc(c.type)}">
+      <b>${esc(c.type)}</b>${esc(c.text)}<i>→ ${esc(c.value)}</i></button>`).join('') || '<span class="hint">청크 없음</span>'}</div>
+    <div class="chunk-editor" hidden>
+      <div class="grid-form">
+        <div><label>타입</label><select class="ce-type"><option value="date">date</option><option value="time">time</option><option value="place">place</option><option value="activity">activity</option><option value="note">note</option></select></div>
+        <div><label>원문</label><input class="ce-text" /></div>
+        <div><label>정규값</label><input class="ce-value" /></div>
+      </div>
+      <div class="detail-actions"><button class="primary ce-apply" type="button">적용</button>
+        <button class="danger ce-delete" type="button">삭제</button><button class="ghost ce-close" type="button">닫기</button></div>
+    </div>
+    <div class="detail-actions"><button class="ghost chunk-add" type="button">+ 청크 추가</button>
+      <button class="ghost json-toggle" type="button">원본 JSON 보기</button></div>
     <pre class="json-view" hidden>${esc(JSON.stringify(p, null, 2))}</pre>`;
     const btn = box.querySelector('.json-toggle');
     const view = box.querySelector('.json-view');
@@ -220,6 +246,71 @@
       view.hidden = !view.hidden;
       btn.textContent = view.hidden ? '원본 JSON 보기' : '원본 JSON 숨기기';
     });
+
+    // 청크 편집기
+    const editor = box.querySelector('.chunk-editor');
+    const typeSel = box.querySelector('.ce-type');
+    const textInput = box.querySelector('.ce-text');
+    const valueInput = box.querySelector('.ce-value');
+    let editing = null;
+
+    function openChunk(i) {
+      editing = i;
+      const chunk = (p.chunks || [])[i];
+      if (!chunk) return;
+      typeSel.value = chunk.type; textInput.value = chunk.text; valueInput.value = chunk.value;
+      editor.hidden = false;
+    }
+    box.querySelectorAll('.chunk-edit').forEach(chip => chip.addEventListener('click', () => openChunk(Number(chip.dataset.chunk))));
+    box.querySelector('.ce-close').addEventListener('click', () => { editor.hidden = true; editing = null; });
+    box.querySelector('.chunk-add').addEventListener('click', () => {
+      p.chunks = p.chunks || [];
+      p.chunks.push({ type:'note', start:9999, text:'새 청크', value:'확인 필요' });
+      renderParsedPlan();
+      toast('청크를 추가했습니다. 내용을 편집해 주세요.');
+    });
+    box.querySelector('.ce-delete').addEventListener('click', () => {
+      if (editing == null) return;
+      p.chunks.splice(editing, 1);
+      editor.hidden = true; editing = null;
+      renderParsedPlan(); toast('청크를 삭제했습니다.');
+    });
+    box.querySelector('.ce-apply').addEventListener('click', () => {
+      if (editing == null) return;
+      const chunk = p.chunks[editing];
+      const oldValue = chunk.value, oldType = chunk.type;
+      chunk.type = typeSel.value; chunk.text = textInput.value.trim(); chunk.value = valueInput.value.trim();
+      applyChunkToPlan(p, chunk, oldType, oldValue);
+      editor.hidden = true; editing = null;
+      renderParsedPlan();
+      if (state.selectedRoute) revalidate();
+      toast('청크를 반영했습니다.');
+    });
+  }
+
+  // 편집된 청크 값을 플랜 구조 데이터에 반영한다.
+  function applyChunkToPlan(plan, chunk, oldType, oldValue) {
+    if (oldType === 'date') plan.travel_date = chunk.value;
+    if (oldType === 'time') {
+      (plan.activities || []).forEach(a => {
+        ['start_time', 'earliest_start', 'preferred_time'].forEach(k => {
+          if (a[k] === oldValue) a[k] = chunk.value;
+        });
+      });
+    }
+    if (oldType === 'place') {
+      (plan.activities || []).forEach(a => { if (a.place === oldValue) a.place = chunk.value; });
+    }
+    if (oldType === 'note') {
+      plan.special_notes = (plan.special_notes || []).map(n => n === oldValue ? chunk.value : n);
+      if (!plan.special_notes.includes(chunk.value)) plan.special_notes.push(chunk.value);
+    }
+    if (oldType === 'activity') {
+      (plan.activities || []).forEach(a => {
+        if (a.keyword === oldValue || a.category === oldValue) a.keyword = chunk.value;
+      });
+    }
+    state.startDate = plan.travel_date || state.startDate;
   }
 
   function renderDensity(data) {

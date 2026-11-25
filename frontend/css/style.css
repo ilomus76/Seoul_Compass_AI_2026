@@ -186,10 +186,19 @@ a.danger { text-decoration:none; }
 .chunk-place { border-color:rgba(86,121,176,.5); }
 .chunk-activity { border-color:rgba(123,107,181,.5); }
 .chunk-note { border-color:rgba(180,95,84,.5); }
+.place-table { font-size:8px; }
+.place-table th,.place-table td { padding:4px; font-size:8px; white-space:normal; }
+.place-table small { color:var(--muted); font-size:7px; }
+.place-table td:first-child { min-width:110px; }
 .plan-table { font-size:8px; }
 .plan-table th,.plan-table td { padding:4px; font-size:8px; }
 .json-view { max-height:180px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; font-family:ui-monospace,Consolas,monospace; font-size:8px; color:var(--muted); white-space:pre-wrap; margin-top:8px; }
 .json-view[hidden] { display:none; }
+button.chunk { font:inherit; color:inherit; }
+.chunk-edit { cursor:pointer; }
+.chunk-edit:hover { filter:brightness(1.2); border-color:var(--gold); }
+.chunk-editor { margin-top:8px; border:1px solid var(--line); border-radius:9px; padding:9px; background:var(--bg); }
+.chunk-editor[hidden] { display:none; }
 
 @media (max-width:900px) {
   html,body { overflow:auto; height:auto; }
