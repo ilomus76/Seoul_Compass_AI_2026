@@ -10,7 +10,9 @@
     parsed: null, routes: [], selectedRoute: null, startDate: null, tripId: null,
     mapMode: 'geo', gps: { used: false, source: null, accuracy: null },
     watchId: null, scrubTimer: null, voice: null, listening: false,
-    density: null, transport: null, alarms: [], chat: [], weather: null
+    density: null, transport: null, alarms: [], chat: [], weather: null,
+    sim: { playing:false, progress:0, speed:1, mode:'walking', timer:null, logged:-1 },
+    kakaoKey: null
   };
   let lastPlaces = [], lastScores = [];
   let reportCache = {};
@@ -46,8 +48,11 @@
       radius_km: Number($('radius').value) || 5,
       places: lastPlaces, scores: lastScores, route: state.selectedRoute, routes: state.routes
     };
-    if (state.mapMode === 'geo') SeoulCompassMap.renderGeo($('compass'), payload);
+    if (state.kakaoKey && state.mapMode === 'geo') {
+      SeoulMapHelper.useKakaoMap($('compass'), state.kakaoKey, payload.start, payload);
+    } else if (state.mapMode === 'geo') SeoulCompassMap.renderGeo($('compass'), payload);
     else SeoulCompassMap.render($('compass'), payload);
+    applySimMarker();
     $('mapModeGeo').classList.toggle('active', state.mapMode === 'geo');
     $('mapModePolar').classList.toggle('active', state.mapMode === 'polar');
     const name = $('locationName').value;
@@ -484,6 +489,101 @@
     renderChat();
   });
 
+  /* ---------- 경로 시뮬레이션 ---------- */
+  function simNodes() { return (state.selectedRoute && state.selectedRoute.nodes) || []; }
+
+  function simPosition() {
+    const nodes = simNodes();
+    if (!nodes.length) return null;
+    const cfg = inputs();
+    const start = { latitude: cfg.lat, longitude: cfg.lng };
+    const seg = Math.min(nodes.length - 1, Math.floor(state.sim.progress * (nodes.length - 1)));
+    const frac = state.sim.progress * (nodes.length - 1) - seg;
+    const a = SeoulCompassMap.projectForSim(nodes[seg].place, start, cfg.radius);
+    const b = nodes[seg + 1]
+      ? SeoulCompassMap.projectForSim(nodes[seg + 1].place, start, cfg.radius) : a;
+    return { seg, frac, x: a.x + (b.x - a.x) * frac, y: a.y + (b.y - a.y) * frac };
+  }
+
+  function simLog(message) {
+    const box = $('simLog'); if (!box) return;
+    const time = new Date().toTimeString().slice(0, 8);
+    box.insertAdjacentHTML('afterbegin', `<div>[${time}] ${esc(message)}</div>`);
+    while (box.children.length > 12) box.lastElementChild.remove();
+  }
+
+  function applySimMarker() {
+    const marker = document.querySelector('#compass #simMarker');
+    const pos = simPosition();
+    if (!marker || !pos) return;
+    marker.hidden = false;
+    marker.setAttribute('cx', pos.x.toFixed(1));
+    marker.setAttribute('cy', pos.y.toFixed(1));
+  }
+
+  function updateSimUI() {
+    const nodes = simNodes();
+    if (!nodes.length) return;
+    const pos = simPosition();
+    const from = nodes[pos.seg].place.name;
+    const to = nodes[pos.seg + 1] ? nodes[pos.seg + 1].place.name : from;
+    const remaining = nodes.slice(pos.seg).reduce((s, n) => s + (n.distance_km || 0), 0) * (1 - pos.frac);
+    const mins = Math.max(1, Math.round(remaining / ({walking:5,bus:20,subway:30})[state.sim.mode] * 60));
+    const crowd = nodes[pos.seg].place.crowd_by_hour
+      ? Math.round(Object.values(nodes[pos.seg].place.crowd_by_hour).reduce((a,b)=>a+b,0) / Object.values(nodes[pos.seg].place.crowd_by_hour).length)
+      : 0;
+    $('simStatus').innerHTML = `${state.sim.playing ? '▶ 이동 중' : '❚❚ 일시정지'} · ${esc(from)} → ${esc(to)}<br>
+      남은 거리 ${remaining.toFixed(1)}km · 예상 ${mins}분 · 혼잡 ${crowd}% · ${esc(state.sim.mode)}`;
+    $('simProgress').style.width = (state.sim.progress * 100).toFixed(1) + '%';
+    $('simBadge').textContent = state.sim.playing ? '재생 중' : (state.sim.progress > 0 ? '일시정지' : '대기');
+    if (pos.seg !== state.sim.logged) {
+      state.sim.logged = pos.seg;
+      simLog(`도착 예정: ${from}`);
+      if (pos.seg > 0) toast(`${from}에 도착했습니다.`);
+    }
+    applySimMarker();
+  }
+
+  function simTick() {
+    state.sim.progress = Math.min(1, state.sim.progress + 0.012 * state.sim.speed);
+    if (state.sim.progress >= 1) { simPause(); simLog('전체 경로 주행 완료'); toast('시뮬레이션이 완료되었습니다.'); }
+    updateSimUI();
+  }
+  function simPlay() {
+    if (!simNodes().length) { toast('먼저 경로를 분석해 주세요.'); return; }
+    if (state.sim.timer) return;
+    state.sim.playing = true;
+    state.sim.timer = setInterval(simTick, 100);
+    $('simPlay').textContent = '❚❚ 정지';
+    simLog('시뮬레이션 시작');
+    updateSimUI();
+  }
+  function simPause() {
+    clearInterval(state.sim.timer); state.sim.timer = null;
+    state.sim.playing = false;
+    $('simPlay').textContent = '▶ 재생';
+    updateSimUI();
+  }
+  function simReset() {
+    simPause(); state.sim.progress = 0; state.sim.logged = -1;
+    $('simLog').innerHTML = '';
+    updateSimUI();
+  }
+  $('simPlay').addEventListener('click', () => { state.sim.timer ? simPause() : simPlay(); });
+  $('simReset').addEventListener('click', simReset);
+  $('simPrev').addEventListener('click', () => {
+    const n = Math.max(1, simNodes().length);
+    state.sim.progress = Math.max(0, Math.floor(state.sim.progress * (n - 1)) - 1) / Math.max(1, n - 1);
+    updateSimUI();
+  });
+  $('simNext').addEventListener('click', () => {
+    const n = Math.max(1, simNodes().length);
+    state.sim.progress = Math.min(1, (Math.floor(state.sim.progress * (n - 1)) + 1) / Math.max(1, n - 1));
+    updateSimUI();
+  });
+  $('simSpeed').addEventListener('change', () => { state.sim.speed = Number($('simSpeed').value); });
+  $('simMode').addEventListener('change', () => { state.sim.mode = $('simMode').value; updateSimUI(); });
+
   /* ---------- 분석 ---------- */
   function inputs() {
     return {
@@ -527,6 +627,8 @@
         renderDensity(densityData);
       } catch (err) { $('densityList').textContent = err.message; }
       await renderWeather();
+      document.body.classList.toggle('sim-rain', !!(state.weather && state.weather.rainy));
+      simReset();
       renderAlarms();
       await renderSafety();
       await analyzeTransport(null);
@@ -692,12 +794,16 @@
   });
   async function loadStatus() {
     try {
+      const cfg = await request('/api/config');
+      // 카카오 JavaScript 키는 허용 도메인 제한 하의 공개 키다.
+      state.kakaoKey = cfg.kakao_javascript_key || null;
       const h = await request('/api/health');
       $('apiStatus').innerHTML = `<span>서버 상태 <b>${esc(h.status)}</b></span>
         <span>샘플 장소 <b>${h.places}곳</b></span><span>포트 <b>${h.port}</b></span>
         <span>음성 인식 <b>${state.voice ? 'Web Speech API' : '미지원'}</b></span>
         <span>GPS <b>${navigator.geolocation ? '사용 가능' : '미지원'}</b></span>
-        <span>외부 API <b>미연동 (추정 경로)</b></span>`;
+        <span>지도 제공 <b>${state.kakaoKey ? '카카오맵' : 'SVG (폴백)'}</b></span>
+        <span>외부 경로 API <b>미연동 (추정 경로)</b></span>`;
     } catch (err) { $('apiStatus').innerHTML = `<span>서버 오류: ${esc(err.message)}</span>`; }
   }
   $('saveTripBtn').addEventListener('click', saveTrip);

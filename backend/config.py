@@ -3,6 +3,16 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# .env 파일을 간단히 읽어 환경변수로 등록 (추가 라이브러리 없음)
+_env_file = ROOT / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 DATA_DIR = ROOT / "data"
 FRONTEND_DIR = ROOT / "frontend"
 DB_PATH = DATA_DIR / "travel.db"

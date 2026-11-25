@@ -51,6 +51,21 @@ Seoul_Compass_AI_2026/
 
 기존 정적 데모(`index.html`, `assets/`)는 그대로 두어 이전 화면도 확인할 수 있습니다. 새 서비스는 `frontend/`와 FastAPI 백엔드로 동작합니다.
 
+## 카카오맵 연동 (선택)
+
+키가 없으면 자체 SVG 지도로 동작하며, 아래 설정 후에는 카카오맵 JS SDK로 자동 전환됩니다.
+
+1. [Kakao Developers](https://developers.kakao.com) → 애플리케이션 생성 → **JavaScript 키** 발급
+2. 앱 설정 → **플랫폼 → Web**에 `localhost`, `127.0.0.1` 도메인 등록
+3. 프로젝트 루트에 `.env` 파일 생성 (`.gitignore`로 제외됨):
+   ```
+   KAKAO_JAVASCRIPT_KEY=발급받은_javascript_키
+   KAKAO_REST_API_KEY=발급받은_rest_키
+   ```
+4. 서버 재시작 → `GET /api/config`의 `map_mode`가 `kakao`로 변경되고 지도·마커·반경원·TOP3 경로가 카카오맵에 표시됨
+
+> 실제 도보/대중교통 길찾기(카카오모빌리티 API)는 별도 승인·키가 필요하며, 현재는 추정 경로입니다.
+
 ## API
 
 | Method | Endpoint | 기능 |

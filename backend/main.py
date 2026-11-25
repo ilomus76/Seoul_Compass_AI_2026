@@ -205,7 +205,9 @@ def safety_help(payload: Dict) -> Dict:
 @app.get("/api/config")
 def frontend_config() -> Dict:
     """프론트 설정: 카카오맵 키 존재 여부만 노출한다."""
+    # JavaScript 키는 도메인 제한 하에 브라우저에 노출되는 공개 키다.
     return {"kakao_javascript_key_configured": bool(KAKAO_JAVASCRIPT_KEY),
+            "kakao_javascript_key": KAKAO_JAVASCRIPT_KEY,
             "map_mode": "kakao" if KAKAO_JAVASCRIPT_KEY else "svg"}
 
 

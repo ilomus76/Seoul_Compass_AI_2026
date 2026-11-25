@@ -182,6 +182,7 @@
       <circle class="start-pulse" cx="300" cy="300" r="10"/>
       <circle cx="300" cy="300" r="9" fill="#b8914e" stroke="#f5f2eb" stroke-width="2"/>
       <text class="map-label" x="314" y="304">출발지</text>
+      <circle id="simMarker" class="sim-marker" cx="300" cy="300" r="7" hidden/>
     </svg>`;
 
     const legend = document.getElementById('compassLegend');
@@ -189,5 +190,15 @@
       + '<span><i style="background:#3aa8c8"></i>한강</span>';
   }
 
-  global.SeoulCompassMap = { render, renderGeo };
+  // 시뮬레이션 마커용 좌표 계산 (renderGeo와 동일한 투영)
+  function projectForSim(place, start, radiusKm) {
+    const raw = start || {};
+    const center = {
+      lat: Number(raw.latitude != null ? raw.latitude : (raw.lat != null ? raw.lat : 37.5665)),
+      lng: Number(raw.longitude != null ? raw.longitude : (raw.lng != null ? raw.lng : 126.9780))
+    };
+    return geoProject(place.lat, place.lng, center, Number(radiusKm) || 5, 275);
+  }
+
+  global.SeoulCompassMap = { render, renderGeo, projectForSim };
 })(window);

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Seoul Compass AI — 관측 데스크</title>
-  <link rel="stylesheet" href="/css/style.css?v=19" />
+  <link rel="stylesheet" href="/css/style.css?v=21" />
 </head>
 <body data-theme="light">
   <!-- 상단: 인라인 질문 -->
@@ -110,6 +110,20 @@
             <div class="section-head"><p class="eyebrow">TRANSPORT</p><h2>추천 이동수단</h2></div>
             <div id="transportList" class="route-list"></div>
           </section>
+          <section id="simulationPanel" class="inner-section">
+            <div class="section-head"><div><p class="eyebrow">SIMULATION</p><h2>경로 시뮬레이션</h2></div><span id="simBadge" class="badge">대기</span></div>
+            <div class="sim-controls">
+              <select id="simMode" aria-label="이동수단"><option value="walking">도보</option><option value="bus">버스</option><option value="subway">지하철</option></select>
+              <select id="simSpeed" aria-label="속도"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option></select>
+              <button id="simPrev" class="ghost" type="button">◀ 이전</button>
+              <button id="simPlay" class="primary" type="button">▶ 재생</button>
+              <button id="simNext" class="ghost" type="button">다음 ▶</button>
+              <button id="simReset" class="danger" type="button">초기화</button>
+            </div>
+            <div id="simStatus" class="sim-status">경로를 분석하면 시뮬레이션할 수 있습니다.</div>
+            <div class="bar-track"><div id="simProgress" class="bar-fill" style="width:0%;--bar-color:#b8914e"></div></div>
+            <div id="simLog" class="sim-log"></div>
+          </section>
           <section id="alarmPanel" class="inner-section">
             <div class="section-head"><p class="eyebrow">ALARM</p><h2>시간 알람</h2></div>
             <p class="hint">활동을 시작하면 왕복 시간의 절반 시점에 알람이 울립니다.</p>
@@ -179,13 +193,13 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/js/charts.js?v=19"></script>
-  <script src="/js/compass.js?v=19"></script>
-  <script src="/js/map.js?v=19"></script>
-  <script src="/js/schedule.js?v=19"></script>
-  <script src="/js/route.js?v=19"></script>
-  <script src="/js/history.js?v=19"></script>
-  <script src="/js/i18n.js?v=19"></script>
-  <script src="/js/app.js?v=19"></script>
+  <script src="/js/charts.js?v=21"></script>
+  <script src="/js/compass.js?v=21"></script>
+  <script src="/js/map.js?v=21"></script>
+  <script src="/js/schedule.js?v=21"></script>
+  <script src="/js/route.js?v=21"></script>
+  <script src="/js/history.js?v=21"></script>
+  <script src="/js/i18n.js?v=21"></script>
+  <script src="/js/app.js?v=21"></script>
 </body>
 </html>

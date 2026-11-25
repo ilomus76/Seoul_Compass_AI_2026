@@ -72,5 +72,57 @@
     };
   }
 
-  global.SeoulMapHelper = { useCurrentLocation, watchPosition, stopWatch, screenToLatLng, ipFallback };
+  /* 카카오맵 JS SDK 연동 (키가 있을 때만 사용, 없으면 SVG 지도 폴백) */
+  let kakaoMap = null;
+  let kakaoOverlays = [];
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const old = document.querySelector(`script[src="${src}"]`);
+      if (old && window.kakao) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = src; s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function useKakaoMap(container, key, center, data) {
+    if (!key || !container) return false;
+    const lat = Number(center.latitude) || 37.5665;
+    const lng = Number(center.longitude) || 126.9780;
+    loadScript(`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`)
+      .then(() => window.kakao.maps.load(() => {
+        const km = window.kakao.maps;
+        const pos = new km.LatLng(lat, lng);
+        if (!kakaoMap) {
+          container.innerHTML = '';
+          kakaoMap = new km.Map(container, { center: pos, level: 3 });
+        } else {
+          kakaoMap.setCenter(pos);
+        }
+        kakaoOverlays.forEach(o => o.setMap(null));
+        kakaoOverlays = [];
+        // 검색 반경 원
+        const circle = new km.Circle({ center: pos, radius: (Number(data.radius_km) || 5) * 1000,
+          strokeColor:'#b8914e', strokeOpacity:.5, fillColor:'#b8914e', fillOpacity:.08 });
+        circle.setMap(kakaoMap); kakaoOverlays.push(circle);
+        // 장소 마커
+        (data.places || []).forEach(p => {
+          const marker = new km.Marker({ position: new km.LatLng(p.lat, p.lng) });
+          marker.setMap(kakaoMap); kakaoOverlays.push(marker);
+        });
+        // 경로 폴리라인 (TOP3 색상)
+        const colors = ['#b8914e','#2f8f83','#b45f54'];
+        (data.routes || []).forEach((r, i) => {
+          const path = (r.nodes || []).map(n => new km.LatLng(n.place.lat, n.place.lng));
+          if (path.length < 2) return;
+          const line = new km.Polyline({ path, strokeColor: colors[i % 3], strokeOpacity:.9, strokeWeight:4 });
+          line.setMap(kakaoMap); kakaoOverlays.push(line);
+        });
+      }))
+      .catch(() => { /* 로드 실패 시 SVG 폴백 유지 */ });
+    return true;
+  }
+
+  global.SeoulMapHelper = { useCurrentLocation, watchPosition, stopWatch, screenToLatLng, ipFallback, useKakaoMap };
 })(window);

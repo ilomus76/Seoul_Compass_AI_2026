@@ -199,6 +199,16 @@ button.chunk { font:inherit; color:inherit; }
 .chunk-edit:hover { filter:brightness(1.2); border-color:var(--gold); }
 .chunk-editor { margin-top:8px; border:1px solid var(--line); border-radius:9px; padding:9px; background:var(--bg); }
 .chunk-editor[hidden] { display:none; }
+.sim-controls { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:8px; }
+.sim-controls select { width:auto; flex:1; min-width:70px; font-size:9px; padding:5px; }
+.sim-controls button { font-size:9px; padding:6px 9px; }
+.sim-status { font-size:9px; color:var(--gold); margin-bottom:6px; line-height:1.6; }
+.sim-log { max-height:80px; overflow-y:auto; margin-top:7px; font-size:8px; color:var(--muted); }
+.sim-log div { border-bottom:1px solid var(--line); padding:3px 0; }
+.sim-marker { fill:var(--coral); stroke:var(--panel-solid); stroke-width:2; filter:drop-shadow(0 0 6px var(--coral)); }
+body.sim-rain .map-stage::before { content:''; position:absolute; inset:0; z-index:3; pointer-events:none;
+  background:repeating-linear-gradient(115deg,transparent 0 16px,rgba(120,190,220,.22) 17px 18px); animation:rainMove .5s linear infinite; }
+@keyframes rainMove { to { background-position:0 36px; } }
 
 @media (max-width:900px) {
   html,body { overflow:auto; height:auto; }
