@@ -17,6 +17,7 @@
     category: 'all',
     query: '',
     indoorOnly: false,
+    outdoorOnly: false,
     course: [],
     selected: null
   };
@@ -80,6 +81,7 @@
     return SPOTS.filter((s) => {
       if (state.category !== 'all' && s.category !== state.category) return false;
       if (state.indoorOnly && !s.indoor) return false;
+      if (state.outdoorOnly && s.indoor) return false;
       if (!q) return true;
       const hay = [s.name, s.nameEn, s.desc, s.descEn, districtOf(s), catOf(s.category), ...s.tags]
         .join(' ').toLowerCase();
@@ -232,7 +234,9 @@
     state.course = nearestOrder(seed, picked).map((s) => s.id);
     state.category = 'all';
     state.indoorOnly = false;
+    state.outdoorOnly = false;
     $('#indoorToggle').checked = false;
+    $('#outdoorToggle').checked = false;
     renderFilters();
     renderSpots();
     renderCourse();
@@ -360,6 +364,13 @@
     }));
     $('#indoorToggle').addEventListener('change', (e) => {
       state.indoorOnly = e.target.checked;
+      if (state.indoorOnly) { state.outdoorOnly = false; $('#outdoorToggle').checked = false; }
+      renderSpots();
+      renderMap();
+    });
+    $('#outdoorToggle').addEventListener('change', (e) => {
+      state.outdoorOnly = e.target.checked;
+      if (state.outdoorOnly) { state.indoorOnly = false; $('#indoorToggle').checked = false; }
       renderSpots();
       renderMap();
     });

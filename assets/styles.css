@@ -110,6 +110,7 @@ button { cursor: pointer; }
 /* Explore grid */
 .explore-grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 22px; align-items: start; }
 .result-bar { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+.result-toggles { display: flex; gap: 14px; }
 .toggle { display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .toggle input { accent-color: var(--accent); }
 .spot-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }

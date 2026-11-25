@@ -52,7 +52,7 @@
         <div class="hero-stats">
           <div><strong id="statSpots">0</strong><span data-i18n="stat.spots">수록 명소</span></div>
           <div><strong id="statAreas">0</strong><span data-i18n="stat.areas">커버 지역</span></div>
-          <div><strong>4</strong><span data-i18n="stat.langs">지원 언어</span></div>
+          <div><strong>2</strong><span data-i18n="stat.langs">지원 언어</span></div>
         </div>
       </div>
       <div class="hero-art" aria-hidden="true">
@@ -93,7 +93,10 @@
         <div class="spots-column">
           <div class="result-bar">
             <span id="resultCount" aria-live="polite">—</span>
-            <label class="toggle"><input type="checkbox" id="indoorToggle" /><span data-i18n="explore.indoor">실내만 보기</span></label>
+            <div class="result-toggles">
+              <label class="toggle"><input type="checkbox" id="indoorToggle" /><span data-i18n="explore.indoor">실내만 보기</span></label>
+              <label class="toggle"><input type="checkbox" id="outdoorToggle" /><span data-i18n="explore.outdoor">실외만 보기</span></label>
+            </div>
           </div>
           <div id="spotList" class="spot-list"></div>
         </div>
