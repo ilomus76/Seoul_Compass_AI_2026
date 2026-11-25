@@ -175,6 +175,17 @@ th { color:var(--muted); font-weight:500; }
 .alarm-bar { transition:width .3s linear; }
 .alarm-time { font-family:ui-monospace,monospace; color:var(--gold); }
 a.danger { text-decoration:none; }
+.chunk-title { display:flex; justify-content:space-between; font-size:9px; color:var(--muted); margin:9px 0 5px; letter-spacing:.08em; }
+.chunk-title span { color:var(--gold); }
+.chunk-row { display:flex; flex-wrap:wrap; gap:5px; }
+.chunk { display:inline-flex; align-items:center; gap:4px; border-radius:7px; padding:3px 7px; font-size:8px; border:1px solid var(--line); background:var(--solid); }
+.chunk b { font-size:7px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.chunk i { font-style:normal; color:var(--muted); }
+.chunk-date { border-color:rgba(184,145,78,.5); }
+.chunk-time { border-color:rgba(47,125,117,.5); }
+.chunk-place { border-color:rgba(86,121,176,.5); }
+.chunk-activity { border-color:rgba(123,107,181,.5); }
+.chunk-note { border-color:rgba(180,95,84,.5); }
 
 @media (max-width:900px) {
   html,body { overflow:auto; height:auto; }

@@ -194,7 +194,10 @@
       ${item('특이사항', (p.special_notes || []).join(' · '))}
       ${item('예산', p.budget_krw ? `${p.budget_krw}원` : '미지정')}
       ${item('신뢰도', (p.warnings || []).length ? '확인 필요' : '높음')}
-    </div>`;
+    </div>
+    <div class="chunk-title">입력 청크 분류 <span>${(p.chunks || []).length}개</span></div>
+    <div class="chunk-row">${(p.chunks || []).map(c => `<span class="chunk chunk-${esc(c.type)}" title="${esc(c.type)}">
+      <b>${esc(c.type)}</b>${esc(c.text)}<i>→ ${esc(c.value)}</i></span>`).join('') || '<span class="hint">청크 없음</span>'}</div>`;
   }
 
   function renderDensity(data) {
@@ -469,7 +472,8 @@
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { $('micBtn').disabled = true; $('micBtn').title = '이 브라우저는 음성 인식을 지원하지 않습니다.'; return; }
     const rec = new SR();
-    rec.lang = $('voiceLang').value || 'ko-KR';
+    const speechLocale = (lang) => ({ ko:'ko-KR', en:'en-US', ja:'ja-JP', zh:'zh-CN' })[lang] || 'ko-KR';
+    rec.lang = speechLocale(SeoulI18n.lang);
     rec.interimResults = false; rec.maxAlternatives = 1;
     rec.onresult = (event) => {
       const text = event.results[0][0].transcript;
@@ -481,7 +485,6 @@
     rec.onend = () => { state.listening = false; $('micBtn').textContent = '🎤 음성'; };
     state.voice = rec;
   }
-  $('voiceLang').addEventListener('change', () => { if (state.voice) state.voice.lang = $('voiceLang').value; });
   $('micBtn').addEventListener('click', () => {
     if (!state.voice) { toast('음성 인식을 지원하지 않는 브라우저입니다.'); return; }
     if (state.listening) { state.voice.stop(); return; }
@@ -584,7 +587,9 @@
   $('uiLang').value = SeoulI18n.lang;
   SeoulI18n.apply();
   $('uiLang').addEventListener('change', () => {
-    SeoulI18n.setLang($('uiLang').value);
+    const lang = $('uiLang').value;
+    SeoulI18n.setLang(lang);
+    if (state.voice) state.voice.lang = ({ ko:'ko-KR', en:'en-US', ja:'ja-JP', zh:'zh-CN' })[lang] || 'ko-KR';
     toast('화면 언어가 변경되었습니다.');
   });
 

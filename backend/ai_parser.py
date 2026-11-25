@@ -17,7 +17,7 @@ KEYWORD_RULES = [
     ("international_tourism_area", ["외국인", "국제", "이태원", "관광객", "foreigner",
                                     "international", "itaewon", "外国人", "国際"]),
     ("subway_station", ["지하철역", "지하철", "역으로", "subway", "station", "地下鉄", "地铁"]),
-    ("return_home", ["귀가", "집으로", "집에", "home", "go home", "帰宅", "回家"]),
+    ("return_home", ["귀가", "home", "go home", "帰宅", "回家"]),
     ("shopping", ["쇼핑", "명동", "백화점", "shopping", "shop", "myeongdong", "買い物", "购物"]),
     ("cafe", ["카페", "커피", "cafe", "coffee", "カフェ", "咖啡"]),
     ("night_view", ["야경", "전망", "night view", "night", "view", "夜景"]),
@@ -43,7 +43,7 @@ def extract_times(text: str) -> List[Dict]:
             hour += 12
         # 12시는 정오로 처리 (상속된 오전 접두어로 자정이 되지 않게)
         found.append({"time": f"{hour:02d}:{int(minute) if minute else 0:02d}",
-                      "position": m.start()})
+                      "position": m.start(), "raw": m.group(0).strip()})
 
     # 영어: 9am / 2 pm / 14:00
     for m in re.finditer(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", text, re.I):
@@ -53,7 +53,7 @@ def extract_times(text: str) -> List[Dict]:
         if mer == "am" and hour == 12:
             hour = 0
         found.append({"time": f"{hour:02d}:{int(minute) if minute else 0:02d}",
-                      "position": m.start()})
+                      "position": m.start(), "raw": m.group(0).strip()})
     for m in re.finditer(r"\b(\d{1,2}):(\d{2})\b", text):
         found.append({"time": f"{int(m.group(1)):02d}:{m.group(2)}", "position": m.start()})
     # "from 2 to 4 pm" / "2-4pm" — 뒤의 pm을 앞 숫자에도 적용
@@ -142,6 +142,45 @@ def find_location(text: str) -> str | None:
     return None
 
 
+def chunk_text(text: str) -> List[Dict]:
+    """입력 문장을 날짜·시간·장소·활동·특이사항 청크로 분리한다."""
+    chunks: List[Dict] = []
+
+    def add(kind, start, raw, normalized):
+        chunks.append({"type": kind, "start": start, "text": raw, "value": normalized})
+
+    for pattern in (r"20\d\d[년\-/\.]\s*\d{1,2}[월\-/\.]\s*\d{1,2}일?",
+                    r"(?<!\d)\d{1,2}월\s*\d{1,2}일", r"오늘|내일|today|tomorrow|今日|明天"):
+        for m in re.finditer(pattern, text, re.I):
+            add("date", m.start(), m.group(0), parse_date(m.group(0)) or m.group(0))
+    for t in extract_times(text):
+        raw = t.get("raw") or text[t["position"]:t["position"] + 6].strip()
+        add("time", t["position"], raw, t["time"])
+
+    place_words = ["관악산", "신림역", "이태원", "명동", "경복궁", "남산", "서울역", "홍대", "성수동", "북한산"]
+    for word in place_words:
+        for m in re.finditer(re.escape(word), text):
+            add("place", m.start(), m.group(0), word)
+
+    for category, keywords in KEYWORD_RULES:
+        for word in keywords:
+            for m in re.finditer(re.escape(word), text, re.I):
+                add("activity", m.start(), m.group(0), category)
+
+    for pattern, label in [
+        (r"예산\s*(?:은\s*)?\d+\s*(?:만원|원)", "예산"),
+        (r"비\s*와|우천|rain", "우천"),
+        (r"실내만|실내로|indoor", "실내 선호"),
+        (r"야외만|실외|outdoor", "실외 선호"),
+        (r"동행|친구|만나", "동행"),
+    ]:
+        for m in re.finditer(pattern, text, re.I):
+            add("note", m.start(), m.group(0), label)
+
+    chunks.sort(key=lambda c: (c["start"], c["type"]))
+    return chunks
+
+
 def parse_user_request(text: str) -> Dict:
     """질문을 AGENTS.md 4.2 형태의 구조화된 dict로 변환한다."""
     times = extract_times(text)
@@ -169,6 +208,8 @@ def parse_user_request(text: str) -> Dict:
         chosen = last_time or next_time
         window = text[max(0, position - 30):position + 30]
         has_range = bool(re.search(r"부터|까지|~|from|to\b", window, re.I))
+        # "2시부터 5시까지 등산"은 시작 시각을 사용한다.
+        effective = before[-2]["time"] if has_range and len(before) >= 2 else chosen
 
         activity = {
             "id": len(activities) + 1, "category": category, "keyword": item["matched"],
@@ -178,21 +219,13 @@ def parse_user_request(text: str) -> Dict:
             "required": True, "duration_minutes": 60,
         }
         if category in fixed_categories:
-            activity["start_time"] = chosen
-            activity["fixed_time"] = chosen is not None
+            activity["start_time"] = effective
+            activity["fixed_time"] = effective is not None
         elif category == "shower":
-            activity["earliest_start"] = chosen
+            activity["earliest_start"] = effective
             activity["latest_end"] = next_time
         else:
-            if has_range:
-                if after and after[0]["time"] != chosen:
-                    activity["preferred_time"] = after[0]["time"]
-                elif len(before) >= 2:
-                    activity["preferred_time"] = before[-2]["time"]
-                else:
-                    activity["preferred_time"] = chosen
-            else:
-                activity["preferred_time"] = chosen
+            activity["preferred_time"] = after[0]["time"] if has_range and after else effective
         if category == "meeting":
             activity["location"] = find_location(text)
         activity["keywords"] = canonical_keywords(activity["keywords"], category)
@@ -230,6 +263,7 @@ def parse_user_request(text: str) -> Dict:
         "transport_modes": ["walking", "bus", "subway"],
         "purpose": purpose,
         "special_notes": notes,
+        "chunks": chunk_text(text),
         "activities": activities,
         "warnings": warnings,
     }
