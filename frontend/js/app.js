@@ -727,4 +727,5 @@
   refreshTrips().catch(() => {});
   renderScrubber();
   renderChat();
+  renderCurrentMap();
 })();
