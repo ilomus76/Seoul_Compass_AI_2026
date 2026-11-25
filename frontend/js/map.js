@@ -3,13 +3,18 @@
   'use strict';
 
   function ipFallback() {
-    // 외부 키 없이 사용할 수 있는 공개 IP 위치 서비스폴백 (정확도 낮음)
-    return fetch('https://ipapi.co/json/')
+    // 외부 키 없이 사용하는 IP 기반 추정 (정확도 낮음). 429 대비 이중 폴백.
+    return fetch('https://ipwho.is/')
       .then((r) => { if (!r.ok) throw new Error('IP 위치 조회 실패'); return r.json(); })
-      .then((d) => ({
-        latitude: Number(d.latitude), longitude: Number(d.longitude),
-        accuracy: 5000, source: 'ip', city: d.city || ''
-      }));
+      .then((d) => {
+        if (d.success === false) throw new Error(d.message || 'IP 위치 조회 실패');
+        return { latitude: Number(d.latitude), longitude: Number(d.longitude),
+                 accuracy: 5000, source: 'ip', city: d.city || '' };
+      })
+      .catch(() => fetch('https://ipapi.co/json/')
+        .then((r) => { if (!r.ok) throw new Error('IP 위치 조회 실패(요청 제한)'); return r.json(); })
+        .then((d) => ({ latitude: Number(d.latitude), longitude: Number(d.longitude),
+                        accuracy: 5000, source: 'ip', city: d.city || '' })));
   }
 
   function getCurrentPosition() {
