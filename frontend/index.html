@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seoul Compass AI — 서울 컴파스 AI</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SEOUL <b>COMPASS</b> AI <span>v1.0</span></div>
+    <nav>
+      <a href="#input">일정 만들기</a><a href="#map">360도 분석</a>
+      <a href="#schedule">일정표</a><a href="#routes">추천 경로</a>
+      <a href="#report">기대치 리포트</a><a href="#history">나의 여행 기록</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="input" class="card">
+      <h1>어디로 갈지 몰라도 괜찮습니다.</h1>
+      <p class="lead">하고 싶은 일과 시간을 자연어로 적으면, 360도 방향 분석으로 실제 방문 가능한 코스를 찾아드립니다.</p>
+
+      <label for="question">여행 일정 질문</label>
+      <textarea id="question" rows="4" placeholder="예: 오후2시부터 4시까지 쇼핑을 하고싶어 / 9시에 관악산 등산, 14시 신림역 약속, 18시 볼링"></textarea>
+
+      <div class="grid-form">
+        <div><label for="radius">검색 반경</label><select id="radius"><option>1</option><option>3</option><option selected>5</option><option>10</option></select> km</div>
+        <div><label for="date">여행 날짜</label><input id="date" type="date" /></div>
+        <div><label for="locationName">출발지 이름</label><input id="locationName" value="서울시청" /></div>
+        <div><label>&nbsp;</label><button id="geoBtn" class="ghost" type="button">현재 위치 사용</button></div>
+      </div>
+
+      <div class="grid-form">
+        <div><label for="lat">위도</label><input id="lat" type="number" step="0.0001" value="37.5665" /></div>
+        <div><label for="lng">경도</label><input id="lng" type="number" step="0.0001" value="126.9780" /></div>
+        <div><label for="budget">예산(원)</label><input id="budget" type="number" value="50000" /></div>
+        <div><label>이동수단</label><label class="check"><input type="checkbox" class="mode" value="walking" checked />도보</label> <label class="check"><input type="checkbox" class="mode" value="bus" checked />버스</label> <label class="check"><input type="checkbox" class="mode" value="subway" checked />지하철</label></div>
+      </div>
+
+      <details><summary>관심사 가중치 설정</summary>
+        <div class="grid-form">
+          <div>관심사(M) <input id="wM" type="range" min="0" max="100" value="40" /></div>
+          <div>거리(D) <input id="wD" type="range" min="0" max="100" value="25" /></div>
+          <div>품질(Q) <input id="wQ" type="range" min="0" max="100" value="20" /></div>
+          <div>방문가능성(V) <input id="wV" type="range" min="0" max="100" value="15" /></div>
+        </div>
+      </details>
+
+      <button id="analyzeBtn" class="primary" type="button">AI 분석 시작</button>
+      <p id="parseWarnings" class="warn"></p>
+    </section>
+
+    <section id="map" class="card">
+      <h2>360도 방향 분석 <small>8개 구역 · 45도 단위</small></h2>
+      <p class="hint">지도를 클릭하면 출발지 좌표가 변경됩니다.</p>
+      <div id="compass" class="compass"></div>
+      <div id="directionScores" class="score-list"></div>
+    </section>
+
+    <section id="schedule" class="card">
+      <h2>시간대별 일정표</h2>
+      <table id="scheduleTable"><thead><tr><th>활동</th><th>장소</th><th>계획</th><th>예상 시작</th><th>예상 종료</th><th>고정</th></tr></thead><tbody></tbody></table>
+      <p id="conflicts" class="warn"></p>
+    </section>
+
+    <section id="routes" class="card">
+      <h2>추천 경로 TOP 3</h2>
+      <div id="routeList" class="route-list"></div>
+    </section>
+
+    <section id="report" class="card">
+      <h2>AI 기대치 리포트</h2>
+      <div id="reportBody" class="report"></div>
+    </section>
+
+    <section id="history" class="card">
+      <h2>나의 여행 기록</h2>
+      <div class="row"><button id="saveTripBtn" class="primary" type="button">현재 일정 저장</button><button id="refreshTripsBtn" class="ghost" type="button">새로고침</button></div>
+      <div id="tripList" class="trip-list"></div>
+    </section>
+  </main>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/js/compass.js"></script>
+  <script src="/js/map.js"></script>
+  <script src="/js/schedule.js"></script>
+  <script src="/js/route.js"></script>
+  <script src="/js/history.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

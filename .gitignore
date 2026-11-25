@@ -8,3 +8,6 @@ Thumbs.db
 *.log
 config.local.json
 .env
+.env.*
+!.env.example
+data/travel.db

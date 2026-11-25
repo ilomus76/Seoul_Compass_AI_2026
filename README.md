@@ -2,73 +2,80 @@
 
 이곳은 서울 관광을 위한 여행 가이드 개발을 위한 사이트입니다.
 
-서울 명소를 **나침반(극좌표) 뷰와 데이터 시각화**로 탐색하고, 코스를 설계하는 **정적 웹 프로토타입**입니다. GitHub 저장소가 메인(원본)이고, 로컬 폴더는 백업용 복제본입니다.
+**Seoul Compass AI(서울 컴파스 AI)** — 출발지 주변 360도를 스캔해 관심 장소를 찾고, 사용자의 방문 순서·고정 약속시간·이동시간·비용을 고려해 실제 방문 가능한 여행 코스를 추천합니다. 최상위 개발 지침은 [`AGENTS.md`](AGENTS.md)입니다.
 
-## 디자인 · 구조 (Visual Navigator)
+> ⚠️ 샘플 데이터와 시각화 지표는 **데모용 예시**입니다. 실제 운영 정보는 공식 출처에서 확인하세요.
 
-기존의 일반 지도 중심 레이아웃을 **HUD 스타일 3열 대시보드**로 개편했습니다.
+## 실행 방법
 
-- **01 탐색 필터** — 카테고리/검색어/실내·실외 필터와 명소 카드 목록
-- **02 컴패스 뷰** — 서울시청을 중심으로 **방위각·거리를 극좌표에 매핑**한 나침반. 선택 명소를 가리키는 니들, 거리 링, 코스 동선 애니메이션을 표시
-- **03 데이터 인사이트** — 카테고리 분포 **도넛 차트**, 선택 명소 **레이더 프로필**, 7일 기온 **스파크라인**, 시간대 **혼잡 히트맵**
-- **04 코스 설계 / 05 AI 가이드** — 코스 노드·거리·소요 시간과 규칙 기반 컨시어지
+```powershell
+# 의존성 설치 (이미 설치되어 있으면 생략)
+pip install -r requirements.txt
 
-> ⚠️ 수록 정보와 시각화 지표(프로필 점수·혼잡도·기온)는 **데모용 결정론적 시뮬레이션**입니다. 실제 운영 시간·요금·교통 정보는 공식 출처에서 확인하세요.
+# 서버 실행 (전용 포트 9200)
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 9200
+# → http://127.0.0.1:9200  (Swagger UI: /docs)
+```
+
+테스트:
+
+```powershell
+python -m unittest discover -s tests
+```
+
+## 주요 기능
+
+- **자연어 일정 입력** — "오후2시부터 4시까지 쇼핑", "9시 관악산 등산, 14시 신림역 약속, 18시 볼링" 등을 활동/시간 JSON으로 구조화 (키 없이 동작하는 규칙 기반 파서)
+- **360도 방향 분석** — Haversine 직선거리 + 방위각, 8개(45도) 방향 구역별 점수, 지도 부채꼴 표시
+- **시간 제약 검증** — 고정 약속 시간 유지, 도착·시작·종료 시간 계산, 충돌 정보 제공
+- **경로 추천 TOP 3** — 활동별 최대 5개 후보, Beam Search, 경로 점수 `R = 0.35U + 0.25T + 0.20C + 0.20Q`
+- **AI 기대치 리포트** — 추천 이유, 예상 시간/비용, 신뢰도, 주의사항, 대체 장소
+- **여행 기록** — SQLite에 일정/방문 기록 저장, 조회, 수정, 삭제, 이전 일정 재사용
+- **반응형 UI** — 모바일 우선 설계, PC/스마트폰 모두 지원
 
 ## 폴더 구조
 
 ```
 Seoul_Compass_AI_2026/
-├── index.html            # 메인 페이지
-├── assets/
-│   ├── styles.css        # HUD 대시보드·테마·반응형 스타일
-│   ├── data.js           # 샘플 명소 데이터 + 다국어 문자열
-│   ├── viz.js            # 시각화 모듈(극좌표·도넛·레이더·스파크·히트맵)
-│   └── app.js            # 검색/컴패스/코스/챗 컨트롤러
-├── server.py             # 로컬 개발용 정적 서버(표준 라이브러리만 사용)
-└── README.md
+├── AGENTS.md, README.md, requirements.txt, .env.example, .gitignore
+├── frontend/        index.html, css/, js/(app·map·compass·schedule·route·history)
+├── backend/         main.py, config.py, schemas.py, places.py, direction.py,
+│                    scoring.py, optimizer.py, schedule.py, ai_parser.py,
+│                    report.py, database.py, history.py
+├── data/            sample_places.json (예시 장소 24곳), travel.db(실행 시 생성)
+├── tests/           unittest 14건
+├── docs/            architecture, algorithm, api, database, development_plan,
+│                    test_plan, progress, SBOM
+└── (기존 데모)       index.html, assets/, server.py — 삭제하지 않고 유지
 ```
 
-## 실행 방법
+기존 정적 데모(`index.html`, `assets/`)는 그대로 두어 이전 화면도 확인할 수 있습니다. 새 서비스는 `frontend/`와 FastAPI 백엔드로 동작합니다.
 
-별도 설치가 필요 없습니다. 아래 중 하나를 사용하세요.
+## API
 
-전용 포트 **9200**을 사용합니다. 다른 프로젝트의 8000/8001/8010/8080/8787, 9100~9103 대역과 겹치지 않습니다.
+| Method | Endpoint | 기능 |
+|---|---|---|
+| GET | `/api/health` | 상태 확인 |
+| POST | `/api/parse` | 자연어 분석 |
+| POST | `/api/places/search` | 주변 장소 검색 |
+| POST | `/api/directions/analyze` | 8방향 점수 |
+| POST | `/api/routes/recommend` | 추천 경로 TOP3 |
+| POST | `/api/schedule/validate` | 일정 충돌 검사 |
+| POST | `/api/report` | 기대치 리포트 |
+| POST/GET/PATCH/DELETE | `/api/trips...` | 일정 저장·조회·수정·삭제 |
+| POST/GET | `/api/trips/{id}/visits` | 방문 기록 |
 
-```powershell
-# 방법 1: Python 서버 (권장)
-python server.py
-# → http://127.0.0.1:9200
-
-# 방법 2: Python 내장 서버
-python -m http.server 9200
-
-# 방법 3: index.html을 브라우저에서 직접 열기
-```
-
-다른 포트가 필요하면 `python server.py 9201`처럼 번호를 인자로 넘기세요. 포트가 이미 사용 중이면 사용 가능한 다른 번호를 안내합니다.
-
-`index.html`을 직접 열어도 모든 기능이 동작합니다.
+자세한 내용은 [`docs/api.md`](docs/api.md) 참고.
 
 ## Git 작업 흐름 (GitHub 메인 / 컴퓨터 백업)
 
 ```powershell
-# 최신 상태 확인
 git pull origin main
-
-# 작업 후 로컬 커밋
 git add .
 git commit -m "작업 내용"
-
-# GitHub(메인)로 푸시 → 로컬 백업과 동기화 완료
+# GitHub Push는 AGENTS.md 19.4에 따라 사용자 승인 후 진행
 git push origin main
 ```
 
 - 원본(메인): `https://github.com/ilomus76/Seoul_Compass_AI_2026`
 - 로컬 백업: `C:\Users\sehun\OneDrive\문서\기본 프로젝트\Seoul_Compass_AI_2026`
-
-## 라이선스 / 출처
-
-- 프로젝트 코드: 자유롭게 수정·재사용 가능 (데모 프로젝트)
-- 지도·아이콘: 직접 작성한 SVG/이모지 기반 (외부 지도 SDK 미사용)
-- 명소 정보: 공개된 일반 정보를 바탕으로 재작성한 **예시 데이터**

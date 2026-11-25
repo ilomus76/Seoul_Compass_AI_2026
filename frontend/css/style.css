@@ -1,0 +1,50 @@
+/* Seoul Compass AI — 모바일 우선 반응형 스타일 */
+:root { --bg:#0b1220; --panel:#142033; --line:#28364f; --text:#eaf1ff; --muted:#95a4bc; --accent:#4fe0c4; --accent2:#ff9a7b; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:"Pretendard",system-ui,sans-serif; line-height:1.55; }
+.topbar { position:sticky; top:0; z-index:10; display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:12px 18px; background:#0b1220ee; border-bottom:1px solid var(--line); }
+.brand { font-weight:800; letter-spacing:.08em; }
+.brand b { color:var(--accent); }
+.brand span { font-size:10px; color:var(--muted); }
+nav { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; }
+nav a { color:var(--muted); text-decoration:none; }
+nav a:hover { color:var(--accent); }
+main { max-width:1100px; margin:auto; padding:18px; display:flex; flex-direction:column; gap:16px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; }
+h1 { font-size:26px; margin:0 0 8px; }
+h2 { font-size:18px; margin:0 0 12px; }
+h2 small { font-size:11px; color:var(--muted); font-weight:400; }
+.lead, .hint { color:var(--muted); font-size:13px; }
+label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+textarea, input, select { width:100%; background:#0d1728; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px; font:inherit; font-size:13px; }
+.grid-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin:12px 0; }
+.check { display:inline-flex; gap:4px; align-items:center; }
+.check input { width:auto; }
+button { border:0; border-radius:8px; padding:10px 16px; font-weight:700; cursor:pointer; }
+button.primary { background:var(--accent); color:#06231e; }
+button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+button.danger { background:transparent; color:var(--accent2); border:1px solid var(--line); }
+button:hover { filter:brightness(1.1); }
+.warn { color:var(--accent2); font-size:12px; }
+.compass { width:100%; max-width:620px; margin:auto; }
+.compass svg { width:100%; height:auto; }
+.grid-ring { fill:none; stroke:var(--line); stroke-dasharray:3 6; }
+.sector { opacity:.65; }
+.sector:hover { opacity:1; }
+.marker { cursor:pointer; }
+.route-line { fill:none; stroke:var(--accent2); stroke-width:2; stroke-dasharray:6 5; }
+.score-list { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.score-list span { font-size:11px; background:#0d1728; border:1px solid var(--line); border-radius:6px; padding:4px 8px; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th, td { border-bottom:1px solid var(--line); text-align:left; padding:7px; }
+th { color:var(--muted); font-weight:500; }
+.route-list, .trip-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; }
+.route-card, .trip-card { border:1px solid var(--line); border-radius:10px; padding:12px; font-size:12px; background:#0d1728; }
+.route-card h3, .trip-card h3 { margin:0 0 6px; font-size:14px; color:var(--accent); }
+.route-card p, .trip-card p { margin:4px 0; color:var(--muted); }
+.report { font-size:12px; }
+.report h3 { font-size:13px; color:var(--accent); margin:12px 0 4px; }
+.report ul { margin:4px 0 10px; padding-left:18px; }
+.row { display:flex; gap:8px; margin-bottom:12px; }
+.toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--accent); color:#06231e; padding:10px 16px; border-radius:8px; font-size:12px; z-index:50; }
+@media (max-width:600px) { h1 { font-size:21px; } main { padding:10px; } .card { padding:12px; } }
