@@ -265,8 +265,9 @@
 
   async function renderWeather() {
     const cfg = inputs();
+    const targetDate = state.startDate || cfg.date;
     try {
-      const w = await request(`/api/weather?latitude=${cfg.lat}&longitude=${cfg.lng}${cfg.date ? '&date='+cfg.date : ''}`);
+      const w = await request(`/api/weather?latitude=${cfg.lat}&longitude=${cfg.lng}${targetDate ? '&date='+targetDate : ''}`);
       state.weather = w;
       $('weatherBox').innerHTML = `<div class="detail-grid">
         <div><b>기온</b><span>${w.temperature}°C</span></div>
@@ -403,7 +404,8 @@
     if (!cfg.text) { toast('질문을 입력하거나 음성으로 말해 주세요.'); return; }
     try {
       state.parsed = await post('/api/parse', { text: cfg.text });
-      state.startDate = cfg.date || state.parsed.travel_date;
+      // 문장에서 인식한 날짜가 UI 날짜보다 우선한다.
+      state.startDate = state.parsed.travel_date || cfg.date;
       $('parseWarnings').textContent = (state.parsed.warnings || []).join(' ');
       const activities = state.parsed.activities;
       const interests = [];
@@ -614,6 +616,17 @@
     if (state.voice) state.voice.lang = ({ ko:'ko-KR', en:'en-US', ja:'ja-JP', zh:'zh-CN' })[lang] || 'ko-KR';
     toast('화면 언어가 변경되었습니다.');
   });
+
+  // 실시간 날짜/시계: 기본 날짜는 오늘, 시계는 1초마다 갱신
+  const today = new Date().toISOString().slice(0, 10);
+  if (!$('date').value) $('date').value = today;
+  function updateClock() {
+    const n = new Date();
+    $('liveClock').textContent = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${n.toTimeString().slice(0,8)}`;
+  }
+  updateClock(); setInterval(updateClock, 1000);
+  // 날씨는 5분마다 자동 갱신 ( analys 상태가 없으면 무시 )
+  setInterval(() => { if (state.parsed) renderWeather(); }, 5 * 60 * 1000);
 
   initVoice();
   loadStatus();
