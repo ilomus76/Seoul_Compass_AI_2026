@@ -16,6 +16,7 @@ KBO_LEAGUE = '4830'
 KBO_HOMEPAGE = 'https://www.koreabaseball.com/Schedule/Schedule.aspx'
 KBO_SOURCE = 'https://www.thesportsdb.com/league/4830-korean-kbo-league'
 KOREA_TIME = timezone(timedelta(hours=9))
+GENERIC_EVENT_TERMS = {'야구', '야구장', '야구관람', '야구경기', '야구경기관람', '경기', '경기관람'}
 TEAMS = {
     'Doosan Bears': '두산 베어스', 'LG Twins': 'LG 트윈스', 'Kiwoom Heroes': '키움 히어로즈',
     'SSG Landers': 'SSG 랜더스', 'KT Wiz': 'KT 위즈', 'Hanwha Eagles': '한화 이글스',
@@ -107,14 +108,20 @@ def events() -> list[dict]:
     return json.loads((DATA_DIR / 'baseball_events.json').read_text(encoding='utf-8'))
 
 
+def event_name_key(name: str) -> str:
+    # 요청 날짜는 별도로 대조하므로 대회 제목에 붙은 연도는 이름 비교에서 제외한다.
+    return normalize_name(re.sub(r'(?<!\d)(?:19|20)\d{2}(?!\d)', '', name))
+
+
 def event_options(activity: dict, travel_date: date, region: str | None) -> tuple[list[dict], bool]:
     """날짜·지역·구장·대진 조건을 적용하고 API 실패를 빈 응답과 구별한다."""
     venue = normalize_name(activity.get('location') or '')
-    terms = [normalize_name(term) for term in activity.get('event_terms', []) if term.strip()]
+    terms = [term for term in map(event_name_key, activity.get('event_terms', []))
+             if term and term not in GENERIC_EVENT_TERMS]
 
     def matches(event):
         venues = [event['venue'], *event.get('venue_aliases', ())]
-        names = normalize_name(' '.join([event['name'], *event.get('search_names', [])]))
+        names = event_name_key(' '.join([event['name'], *event.get('search_names', [])]))
         return (within_region(event['address'], region)
                 and (not venue or any(venue == normalize_name(name) for name in venues))
                 and all(term in names for term in terms))

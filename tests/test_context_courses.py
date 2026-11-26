@@ -142,7 +142,7 @@ class ContextAndMenuTests(unittest.TestCase):
 
     @patch('backend.baseball_schedule.daily_games', return_value=[])
     def test_december_fourth_baseball_game_keeps_seoul_and_shows_official_options(self, _daily_games):
-        intent = model_intent({'category': 'baseball_game', 'request_term': '야구 경기'},
+        intent = model_intent({'category': 'baseball_game', 'request_term': '야구 경기', 'event_terms': ['야구 경기 관람']},
                               {'category': 'restaurant', 'request_term': '식사'},
                               {'category': 'return_to_current', 'request_term': '지금 위치로'}, travel_date='2026-12-04')
         bucheon = {'type': 'current_location', 'name': '현재 위치', 'latitude': 37.50, 'longitude': 126.76}
@@ -162,7 +162,8 @@ class ContextAndMenuTests(unittest.TestCase):
         stadium = {'name': '고척스카이돔', 'source': 'kakao', 'latitude': 37.498, 'longitude': 126.867,
                    'address': '서울 구로구 경인로 430'}
         locate.return_value = stadium
-        intent = model_intent({'category': 'baseball_game', 'request_term': '야구 경기', 'duration_minutes': 150},
+        intent = model_intent({'category': 'baseball_game', 'request_term': '야구 경기', 'duration_minutes': 150,
+                               'event_terms': ['한일 드림 플레이어즈 게임 본경기']},
                               {'category': 'return_to_current', 'request_term': '지금 위치로'}, travel_date='2026-12-05')
         parsed = context_parser.resolve_intent(intent, None, 5)
         self.assertTrue(parsed['location_context']['needs_current_location'])

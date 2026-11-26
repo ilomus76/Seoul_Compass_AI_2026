@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Seoul Compass AI — 관측 데스크</title>
-  <link rel="stylesheet" href="/css/style.css?v=39" />
+  <link rel="stylesheet" href="/css/style.css?v=40" />
 </head>
 <body data-theme="light">
   <!-- 상단: 인라인 질문 -->
@@ -70,7 +70,6 @@
           </div>
         </details>
         <p id="parseWarnings" class="warn"></p>
-        <ul id="eventOptions" class="hint" hidden></ul>
       </div>
     </aside>
 
@@ -111,6 +110,7 @@
     <aside class="rail-right">
       <div class="insight-head"><p class="eyebrow">INSIGHT PANEL</p><h2 id="insightTitle">시각화</h2></div>
       <div class="insight-scroll">
+        <section id="eventNotice" class="chart-box event-notice" aria-live="polite" hidden></section>
         <section id="recommendationPanel" class="chart-box" hidden>
           <p id="recommendationCoverage" class="hint"></p>
           <div id="recommendationList"></div>
@@ -239,9 +239,9 @@
   <script src="/js/compass.js?v=31"></script>
   <script src="/js/map.js?v=33"></script>
   <script src="/js/schedule.js?v=37"></script>
-  <script src="/js/route.js?v=39"></script>
+  <script src="/js/route.js?v=40"></script>
   <script src="/js/history.js?v=22"></script>
   <script src="/js/i18n.js?v=27"></script>
-  <script src="/js/app.js?v=39"></script>
+  <script src="/js/app.js?v=40"></script>
 </body>
 </html>

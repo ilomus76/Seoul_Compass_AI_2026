@@ -908,7 +908,7 @@
     $('analyzeBtn').disabled = true;
     const buttonLabel = $('analyzeBtn').textContent;
     $('analyzeBtn').textContent = '분석 중…';
-    $('eventOptions').hidden = true;
+    SeoulRouteView.renderEventNotice($('eventNotice'), null);
     try {
       // 질문에서 얻은 지난 검색 중심을 새 질문의 수동 위치로 재사용하지 않는다.
       const hasCoordinates = $('lat').value.trim() !== '' && $('lng').value.trim() !== '';
@@ -925,15 +925,7 @@
       state.startDate = state.parsed.travel_date || cfg.date;
       $('parseWarnings').textContent = [state.parsed.analysis_method === 'legacy' ? '문맥 분석 미활성 · 기존 분석 모드' : '',
         ...(state.parsed.warnings || [])].filter(Boolean).join(' · ');
-      const events = state.parsed.event_options || [];
-      const officialLinks = state.parsed.event_links || [];
-      const eventOptions = $('eventOptions');
-      const safeLink = (url, label) => /^https:\/\//i.test(url || '')
-        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>` : '';
-      eventOptions.innerHTML = events.map(event => `<li>${esc(event.date)} ${esc(event.start_time)} · ${esc(event.name)} · ${esc(event.venue)}${
-        event.source_url ? ` · ${safeLink(event.source_url, event.source || '일정 출처')}` : ''}</li>`).join('')
-        + officialLinks.map(link => `<li>${safeLink(link.url, link.label)}</li>`).join('');
-      eventOptions.hidden = !(events.length || officialLinks.length);
+      SeoulRouteView.renderEventNotice($('eventNotice'), state.parsed);
       renderParsedPlan();
       const context = state.parsed.location_context || {};
       state.regions = []; state.selectedRegion = null; state.directionalResult = null;
@@ -1037,8 +1029,10 @@
       SeoulRouteView.renderReport($('reportBody'), reportFor(state.selectedRoute));
       toast(`경로 ${state.routes.length}개를 추천했습니다.`);
     } catch (err) {
-      $('parseWarnings').textContent = err.message || '분석 중 오류가 발생했습니다.';
-      toast($('parseWarnings').textContent);
+      const message = err.message || '분석 중 오류가 발생했습니다.';
+      $('parseWarnings').textContent = message;
+      SeoulRouteView.renderEventNotice($('eventNotice'), null, message);
+      toast(message);
     }
     finally { $('analyzeBtn').disabled = false; $('analyzeBtn').textContent = buttonLabel; }
   }

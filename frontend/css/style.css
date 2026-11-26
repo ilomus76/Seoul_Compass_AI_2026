@@ -154,6 +154,12 @@ details summary { cursor:pointer; color:var(--muted); font-size:10px; }
 .kpi-sub { font-size:8px; color:var(--muted); }
 .kpi svg { width:100%; height:22px; }
 .chart-box { border:1px solid var(--line); border-radius:11px; padding:9px; background:var(--solid); margin-bottom:8px; }
+.event-notice { padding:12px; border-left:3px solid var(--accent); }
+.event-notice h3 { margin:0 0 6px; font-size:14px; }
+.event-notice p { margin:6px 0; }
+.event-notice ul { margin:8px 0; padding-left:18px; }
+.event-notice li { margin:5px 0; }
+.event-notice a { color:var(--accent); font-weight:600; }
 .chart-title { font-size:8px; letter-spacing:.08em; color:var(--muted); margin-bottom:6px; }
 .donut-wrap { position:relative; width:110px; margin:auto; }
 .donut-wrap svg { width:110px; height:110px; }

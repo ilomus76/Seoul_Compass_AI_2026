@@ -8,6 +8,26 @@ const context = {window:{}};
 runInNewContext(readFileSync(join(__dirname, '../frontend/js/journey.js'), 'utf8'), context);
 const J = context.window.SeoulJourney;
 
+test('경기 검색 결과가 없으면 날짜가 다른 경기와 전야제 안내를 결과 영역에 표시한다', () => {
+  const page = {window:{}};
+  runInNewContext(readFileSync(join(__dirname, '../frontend/js/route.js'), 'utf8'), page);
+  const panel = {innerHTML:'', hidden:true};
+  const view = page.window.SeoulRouteView;
+  view.renderEventNotice(panel, {
+    location_context:{needs_confirmation:true,error:'입력한 날짜의 경기를 확인하지 못했습니다.'},
+    event_options:[{date:'2026-12-04',start_time:'18:30',name:'전야제',venue:'고척스카이돔'},
+                   {date:'2026-12-05',start_time:'14:00',name:'본경기',venue:'고척스카이돔'}],
+    event_links:[{label:'공식 홈페이지',url:'https://dreamplayers.kr/'}]
+  });
+  assert.equal(panel.hidden, false);
+  assert.match(panel.innerHTML, /2026-12-04 18:30.*전야제/);
+  assert.match(panel.innerHTML, /2026-12-05 14:00.*본경기/);
+  assert.match(panel.innerHTML, /원하는 날짜와 경기 또는 행사를 질문에 적고 다시 분석/);
+  assert.match(panel.innerHTML, /href="https:\/\/dreamplayers\.kr\/"/);
+  view.renderEventNotice(panel, null, '문맥 분석 API 호출에 실패했습니다.');
+  assert.match(panel.innerHTML, /문맥 분석 API 호출에 실패했습니다/);
+});
+
 test('추가 코스 페이지는 6위 코스와 별도 장소 목록을 같은 세션에서 표시한다', () => {
   const node = () => ({children:[], appendChild(child) { this.children.push(child); }, addEventListener() {}});
   const elements = new Map();

@@ -111,5 +111,26 @@
       <p>데이터 신뢰도: ${data.verification_status === 'unverified' ? '확인 필요' : Math.round((data.data_confidence || 0) * 100) + '%'}</p>`;
   }
 
-  global.SeoulRouteView = { render, renderReport, recommendationList, venuePhone, venueDetails };
+  function renderEventNotice(container, parsed, error = '') {
+    const events = parsed?.event_options || [];
+    const officialLinks = parsed?.event_links || [];
+    const needsConfirmation = !!parsed?.location_context?.needs_confirmation;
+    container.hidden = !(events.length || officialLinks.length || error);
+    if (container.hidden) {
+      container.innerHTML = '';
+      return;
+    }
+    const title = error ? '분석을 완료하지 못했습니다' : needsConfirmation ? '관람 일정을 확인해 주세요' : '경기·행사 일정';
+    const safeLink = (url, label) => /^https:\/\//i.test(url || '')
+      ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>` : '';
+    const eventRows = events.map(event => `<li><strong>${esc(event.date)} ${esc(event.start_time)}</strong> · ${esc(event.name)} · ${esc(event.venue)}${
+      event.source_url ? ` · ${safeLink(event.source_url, event.source || '일정 출처')}` : ''}</li>`).join('');
+    const linkRows = officialLinks.map(link => safeLink(link.url, link.label)).filter(Boolean).map(link => `<li>${link}</li>`).join('');
+    const message = error || (needsConfirmation && parsed.location_context.error);
+    container.innerHTML = `<h3>${title}</h3>${message ? `<p>${esc(message)}</p>` : ''}${eventRows ? `<ul>${eventRows}</ul>` : ''}${
+      needsConfirmation && eventRows ? '<p>원하는 날짜와 경기 또는 행사를 질문에 적고 다시 분석하세요.</p>' : ''}${
+      linkRows ? `<ul>${linkRows}</ul>` : ''}`;
+  }
+
+  global.SeoulRouteView = { render, renderReport, recommendationList, renderEventNotice, venuePhone, venueDetails };
 })(window);
