@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .baseball_schedule import BASEBALL_CATEGORIES, event_options, schedule_links
 from .config import CONTEXT_LLM_ENABLED, CONTEXT_LLM_MODEL, LLM_API_KEY, RADIUS_OPTIONS_KM
 from .direction import haversine
-from .location_context import normalize_name, resolve_place
+from .location_context import normalize_name, resolve_place, within_region
 
 
 class IntentActivity(BaseModel):
@@ -83,15 +83,46 @@ search_queries에는 같은 의미의 장소 검색어를 최대 2개 추가한�
 duration_estimated를 true로 표시한다. 도착 또는 출발지로 복귀 자체라면 체류 시간은 0이다.
 오전 다음 정오 뒤의 2시, 6시처럼 순서가 분명할 때 오후로 해석한다. 불분명하면 확인이 필요한 값을
 clarification에 기록한다. 명시 날짜가 상대 날짜와 충돌하면 명시 날짜를 우선하고 warnings에 설명한다.
+연도가 생략된 미래 일정의 월·일은 제공한 한국 날짜부터 가장 가까운 해당 날짜로 해석한다.
 메뉴는 요구된 음식명만 menu_terms에 넣는다. '맛있는 음식'은 특정 메뉴가 아니다.
 사용자가 말한 표현을 request_term에 유지한다. 장르나 놀이 같은 요구를 search_query와 venue_kind로 보존한다.
 설명은 한국어로 쓰고 최대 12개 활동을 반환한다. 일정에 없는 장소, 메뉴, 영업시간을 추정하지 않는다."""
 
 
+def today_in_korea() -> date:
+    return datetime.now(timezone(timedelta(hours=9))).date()
+
+
+def calendar_date_from_request(text: str, today: date) -> date | None:
+    """한 개의 명시 월·일에 한해 모델이 반환한 달력 날짜를 대조한다."""
+    matches = list(re.finditer(r'(?<!\d)(?:(\d{4})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일', text))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    year, month, day = match.groups()
+    if year:
+        try:
+            return date(int(year), int(month), int(day))
+        except ValueError:
+            return None
+    # 상대 연도나 지난 날짜를 명시한 표현은 문맥 결과를 유지한다.
+    if re.search(r'(?:작년|재작년|지난해|올해|금년|내년|내후년|지난)\s*(?:에|에는|의)?\s*$', text[:match.start()]):
+        return None
+    # 윤년까지 포함해 현재 날짜 이후 가장 가까운 같은 월·일을 선택한다.
+    for candidate_year in range(today.year, min(9999, today.year + 8) + 1):
+        try:
+            candidate = date(candidate_year, int(month), int(day))
+        except ValueError:
+            continue
+        if candidate >= today:
+            return candidate
+    return None
+
+
 def analyze_text(text: str) -> TravelIntent:
     if not CONTEXT_LLM_ENABLED or not LLM_API_KEY:
         raise ContextAnalysisError('문맥 분석 모델이 서버에 활성화되어 있지 않습니다.')
-    today = datetime.now(timezone(timedelta(hours=9))).date()
+    today = today_in_korea()
     # GPS, 기록이나 폼의 위치 값은 전달하지 않는다. 본문에 붙여 넣은 연락처·경위도도 제거한다.
     safe_text = re.sub(r'(?<!\d)(?:\+82[- ]?\d{1,2}|0\d{1,3})[- ]?\d{3,4}[- ]?\d{4}(?!\d)', '[연락처]', text)
     safe_text = re.sub(r'[-+]?\d{1,3}\.\d{3,}\s*,\s*[-+]?\d{1,3}\.\d{3,}', '[좌표]', safe_text)
@@ -119,20 +150,25 @@ def analyze_text(text: str) -> TravelIntent:
         raise ContextAnalysisError('문맥 분석 결과를 확인하지 못했습니다. 잠시 뒤 다시 요청해 주세요.') from error
 
 
-def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius: float | None) -> dict:
+def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius: float | None,
+                   *, request_text: str = '') -> dict:
     """API로 해석한 장소명만 조회하며 좌표와 후보는 모델에서 받지 않는다."""
     fallback = fallback or {}
     radius = intent.radius_km if intent.radius_km is not None else fallback_radius or 5
     errors = [intent.clarification] if intent.clarification else []
     warnings = list(intent.warnings)
-    travel_date = None
+    input_date = calendar_date_from_request(request_text, today_in_korea()) if request_text else None
+    travel_date = input_date
+    resolved_date = input_date.isoformat() if input_date else intent.travel_date
+    if input_date and resolved_date != intent.travel_date:
+        warnings.append(f'입력한 방문 날짜를 {resolved_date}로 적용했습니다.')
     if radius not in RADIUS_OPTIONS_KM:
         errors.append('검색 반경은 1·3·5·10km 중에서 선택해 주세요.')
     if intent.bearing is not None and not 0 <= intent.bearing < 360:
         errors.append('방향을 0도 이상 360도 미만으로 확인해 주세요.')
-    if intent.travel_date:
+    if resolved_date and not travel_date:
         try:
-            travel_date = date.fromisoformat(intent.travel_date)
+            travel_date = date.fromisoformat(resolved_date)
         except ValueError:
             errors.append('여행 날짜를 다시 확인해 주세요.')
     names = {}
@@ -143,8 +179,8 @@ def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius:
         suffix = r'(특별시|광역시|특별자치시|특별자치도|[시군구도])$'
         return re.sub(suffix, '', normalize_name(name)) == re.sub(suffix, '', normalize_name(intent.region_scope))
 
-    def locate(name):
-        if not name or errors:
+    def locate(name, *, allow_errors=False):
+        if not name or (errors and not allow_errors):
             return None
         if name not in names:
             names[name] = resolve_place(name)
@@ -244,10 +280,11 @@ def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius:
 
     confirmed_events = []
     event_links = []
+    event_warning_count = 0
     for activity in baseball:
         options, unavailable = event_options(activity, travel_date, scope) if travel_date else ([], False)
         links = schedule_links(activity, travel_date, scope)
-        matches = [event for event in options if event['date'] == intent.travel_date and event['kind'] == activity['category']]
+        matches = [event for event in options if event['date'] == resolved_date and event['kind'] == activity['category']]
         if center:
             matches = [event for event in matches if not event.get('location') or haversine(
                 center['latitude'], center['longitude'], event['location']['latitude'], event['location']['longitude']) <= radius]
@@ -263,6 +300,28 @@ def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius:
             else:
                 errors.append(f'입력한 조건의 야구 {label} 일정을 확인하지 못했습니다. 아래 홈페이지에서 일정을 확인해 주세요.')
             event_links.extend(link for link in links if link not in event_links)
+            event_warning_count += 1
+            # 같은 날의 관련 행사부터 확인해 참조할 장소와 공식 시각만 남긴다.
+            alternative = next((event for event in options if event['date'] == resolved_date), None)
+            alternative = alternative or next(iter(options), None)
+            reference_name = activity.get('location') or (alternative and alternative['venue'])
+            venue = (alternative or {}).get('location') or locate(reference_name, allow_errors=len(errors) == event_warning_count)
+            if (venue and venue.get('source') == 'kakao' and within_region(venue.get('address') or '', scope)
+                    and (not center or haversine(center['latitude'], center['longitude'],
+                         venue['latitude'], venue['longitude']) <= radius)):
+                detail = errors[-1]
+                if alternative:
+                    detail = (f"요청한 야구 {label} 일정 미확인 · 공식 일정 "
+                              f"{alternative['date']} {alternative['start_time']} {alternative['name']}")
+                source_link = (alternative or {}).get('source_url') or links[0]['url']
+                activity.update(location=reference_name, fixed_location=True, visit_warning={
+                    'reason': detail, 'source': (alternative or {}).get('source') or links[0]['label'],
+                    'source_url': source_link})
+                if alternative and alternative['date'] == resolved_date and not activity.get('start_time'):
+                    activity.update(start_time=alternative['start_time'], fixed_time=False)
+                if not center:
+                    center, center_name = venue, reference_name
+                    reason = '확인된 관련 경기장 · 요청한 관람 일정 확인 필요'
             continue
         venue = match.get('location') or locate(match['venue'])
         if not venue or venue.get('source') != 'kakao':
@@ -285,15 +344,18 @@ def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius:
                            'fixed_location': True, 'duration_minutes': 0, 'duration_estimated': False,
                            'required': True})
     needs_origin = (current_start or current_return or near_current) and current is None
+    reference_available = bool(center and event_warning_count == len(errors)
+                               and any(activity.get('visit_warning') for activity in baseball))
     return {'analysis_method': 'context', 'warnings': warnings + list(dict.fromkeys(errors)),
-            'activities': activities, 'travel_date': intent.travel_date,
+            'activities': activities, 'travel_date': resolved_date,
             'region_scope': scope, 'requested_bearing': intent.bearing, 'route_goal': goal,
             'event_options': confirmed_events, 'event_links': event_links,
             'radius_km': radius, 'departure_time': intent.departure_time,
             'search_center': center, 'start_location': origin,
             'return_location': current if current_return else None,
             'planning_mode': 'region_discovery' if not center and scope and not errors else 'center_search',
-            'live_place_plan': not errors, 'current_location_requested': current_start,
+            'live_place_plan': not errors, 'reference_plan_available': reference_available,
+            'current_location_requested': current_start,
             'location_context': {'needs_confirmation': bool(errors), 'error': errors[0] if errors else None,
                                  'needs_current_location': needs_origin, 'center_name': center_name,
                                  'reason': reason}}

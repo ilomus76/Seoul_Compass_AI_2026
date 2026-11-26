@@ -15,7 +15,7 @@
     tableBody.innerHTML = rows.length
       ? rows.map((r, i) => `<tr data-index="${i}" class="schedule-row">
           <td><span class="activity-chip" style="background:${colors[r.category] || '#4fe0c4'}">${esc(names[r.category] || r.category)}</span></td>
-          <td>${esc(r.place)}</td>
+          <td><span${r.visit_warning ? ' class="visit-warning"' : ''}>${esc(r.place)}</span>${global.SeoulRouteView.visitWarning(r.visit_warning)}</td>
           <td><input class="time-edit" type="time" data-index="${i}" value="${esc(r.planned_start || r.estimated_start)}" /></td>
           <td>${esc(r.estimated_start)}</td><td>${esc(r.estimated_end)}</td>
           <td>${r.fixed_time ? '고정 시각' : '유연 시각'}${r.duration_estimated ? ' · 체류 추정' : ''}<br>
@@ -44,7 +44,7 @@
       const conflicts = (schedule && schedule.conflicts) || [];
       conflictBox.textContent = conflicts.length
         ? `일정 충돌 ${conflicts.length}건: ` + conflicts.map((c) =>
-            `${c.activity_id}번 활동 ${c.shortage_minutes}분 초과`).join(', ')
+            c.kind === 'visit_unavailable' ? `${c.activity_id}번 활동 ${c.reason}` : `${c.activity_id}번 활동 ${c.shortage_minutes}분 초과`).join(', ')
         : (schedule && schedule.note) || '';
     }
   }
@@ -58,7 +58,7 @@
       `<option value="${esc(p.id)}" ${p.id === place.id ? 'selected' : ''}>${esc(p.name)} · ${p.distance_km}km · ${p.score || 0}점</option>`).join('');
     container.innerHTML = `<h3>${esc(activity.category)} · ${esc(place.name)}</h3>
       <div class="detail-grid">
-        <div><b>운영시간</b>${esc(place.hours || '확인 필요')}</div>
+        <div><b>운영시간</b>${esc(global.SeoulRouteView.operatingHours(place))}${global.SeoulRouteView.visitWarning(place.visit_warning)}</div>
         <div><b>이동방법</b>${esc(node.travel_minutes || 0)}분 · ${esc(node.distance_km || 0)}km 추정</div>
         <div><b>예상 비용</b>${place.fee_krw == null ? '확인 필요' : place.fee_krw + '원'}</div>
         <div><b>확인 상태</b>${place.source === 'kakao' ? '장소명·위치 조회 · 실제 방문 미검증' : (place.score || 0) + '점 · 데모 정보 확인 필요'}</div>

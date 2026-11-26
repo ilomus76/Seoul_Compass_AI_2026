@@ -17,6 +17,12 @@ class Location(BaseModel):
     provider_category: Optional[str] = None
 
 
+class VisitWarning(BaseModel):
+    reason: str
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+
+
 class Activity(BaseModel):
     id: int
     category: str
@@ -41,6 +47,7 @@ class Activity(BaseModel):
     fixed_location: bool = False
     fixed_time: bool = False
     required: bool = True
+    visit_warning: Optional[VisitWarning] = None
 
 
 class ParseRequest(BaseModel):

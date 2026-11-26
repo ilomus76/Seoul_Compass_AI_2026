@@ -87,7 +87,7 @@
     ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'})[c]);
 
   // 작은 점만 보이게 하되 투명한 24px 영역으로 마우스·터치 선택은 유지한다.
-  function smallMarker(km, position, title, color, radius = 5) {
+  function smallMarker(km, position, title, color, radius = 5, warning) {
     const key = `${color}-${radius}`;
     if (!markerImages.has(key)) {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="${radius}" fill="${color}" stroke="white" stroke-width="1.5"/></svg>`;
@@ -98,7 +98,7 @@
     marker.setMap(kakaoMap); kakaoOverlays.push(marker);
     const showName = () => {
       if (!markerInfo || !kakaoMap) return;
-      markerInfo.setContent(`<div class="map-place-tooltip">${escapeHtml(title)}</div>`);
+      markerInfo.setContent(`<div class="map-place-tooltip${warning ? ' visit-warning' : ''}">${escapeHtml(title)}${warning ? `<br>${escapeHtml(warning.reason)}` : ''}</div>`);
       markerInfo.open(kakaoMap, marker);
     };
     km.event.addListener(marker, 'mouseover', showName);
@@ -156,8 +156,8 @@
     model.stops.filter(s => s.place && helper.visible(s.index, filter)).forEach(stop => {
       const left = stop.index % 3 === 2, below = stop.index % 3 === 1;
       overlay(new km.LatLng(stop.point.lat, stop.point.lng),
-        `<div class="journey-stop" data-start="${stop.startMinute ?? ''}" data-end="${stop.endMinute ?? ''}" style="--journey-color:${stop.color}" title="${escapeHtml(stop.place.name)} · ${escapeHtml(stop.name)}${stop.conflict ? ' · 시간 충돌' : ''}">
-          <span class="journey-stop-label" style="transform:translate(${left ? -8 : 8}px,${below ? 6 : -6}px)"><b>${stop.index + 1}</b>${escapeHtml(stop.time)}${stop.conflict ? ' !' : ''}</span></div>`,
+        `<div class="journey-stop" data-start="${stop.startMinute ?? ''}" data-end="${stop.endMinute ?? ''}" style="--journey-color:${stop.color}" title="${escapeHtml(stop.place.name)} · ${escapeHtml(stop.name)}${stop.warning ? ` · ${escapeHtml(stop.warning.reason)}` : stop.conflict ? ' · 시간 충돌' : ''}">
+          <span class="journey-stop-label" style="transform:translate(${left ? -8 : 8}px,${below ? 6 : -6}px)"><b>${stop.index + 1}</b>${escapeHtml(stop.time)}${stop.warning ? ` <span class="visit-warning">${escapeHtml(stop.place.name)} · 확인 필요</span>` : stop.conflict ? ' !' : ''}</span></div>`,
         {xAnchor:left ? 1 : 0, yAnchor:below ? 0 : 1});
     });
     helper.highlight(container, Number(document.getElementById('scrubSlider').value));
@@ -184,6 +184,15 @@
     kakaoMap.relayout();
     kakaoMap.setBounds(radiusCircle.getBounds(), 48, 48, 48, 48);
     fittedLevel = kakaoMap.getLevel();
+  }
+
+  // 방문 구간이 반경 안에서 너무 작게 보이면 선택 경로를 화면에 맞춘다.
+  function fitJourney(km, points) {
+    const bounds = new km.LatLngBounds();
+    points.forEach(point => bounds.extend(new km.LatLng(point.lat, point.lng)));
+    fittedLevel = null;
+    kakaoMap.relayout();
+    kakaoMap.setBounds(bounds, 96, 72, 70, 72);
   }
 
   // 중심점에서 지정한 방위와 거리만큼 떨어진 지리 좌표를 구한다.
@@ -289,15 +298,17 @@
                 content: '<span class="map-location-label">경로 출발지</span>' });
               label.setMap(kakaoMap); kakaoOverlays.push(label);
             }
-            if (shouldFit) fitSearchRadius();
+            if (data.focusPoints?.length) fitJourney(km, data.focusPoints);
+            else if (shouldFit) fitSearchRadius();
             renderedSearch = {lat, lng, radius};
             const legend = document.getElementById('compassLegend');
             if (legend) legend.innerHTML = labels.map((label, i) =>
               `<span translate="no"><i style="background:${sectorColors[i]}"></i>${label}</span>`).join('');
             // 장소 마커
             (data.places || []).forEach(p => {
-              const color = (global.SeoulCharts && global.SeoulCharts.COLORS[p.category]) || '#2f8f83';
-              smallMarker(km, new km.LatLng(p.lat, p.lng), p.name, color);
+              const color = p.visit_warning ? global.SeoulJourney.REFERENCE_COLOR
+                : (global.SeoulCharts && global.SeoulCharts.COLORS[p.category]) || '#2f8f83';
+              smallMarker(km, new km.LatLng(p.lat, p.lng), p.name, color, 5, p.visit_warning);
             });
             (data.route_layers || []).forEach(layer => {
               global.SeoulJourney.pathsFor(layer).forEach(points => {

@@ -71,7 +71,7 @@ class LocationContextTests(unittest.TestCase):
         self.assertEqual(result['radius_km'], 3)
 
     def test_parse_endpoint_passes_resolved_center(self):
-        result = parse(ParseRequest(text='명동 주변 1km에서 쇼핑'))
+        result = parse(ParseRequest(text='명동 주변 1km에서 쇼핑', analysis_mode='legacy'))
         self.assertEqual(result['search_center']['name'], '명동')
         self.assertEqual(result['radius_km'], 1)
 

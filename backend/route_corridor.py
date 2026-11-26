@@ -18,8 +18,12 @@ def sector_heading(bearing: float) -> int:
     return int((bearing + HALF_SECTOR) // 10 * 10) % 360
 
 
+def direction_rows(status: str) -> dict[int, dict]:
+    return {heading: {'heading': heading, 'status': status} for heading in HEADINGS}
+
+
 def corridor_options(groups: list[list[dict]], activities: list[dict], request: dict,
-                     find_courses: Callable) -> list[dict]:
+                     find_courses: Callable, review: dict | None = None) -> list[dict]:
     start = request['start_location']
     goal = request.get('route_goal')
     requested = request.get('requested_bearing')
@@ -31,13 +35,14 @@ def corridor_options(groups: list[list[dict]], activities: list[dict], request: 
         bearing_groups.append([(group, None if bearing is None else sector_heading(bearing))
                                for group in options
                                for bearing in [None if return_stop else point_bearing(start, group['center'])]])
-    if not bearing_groups or not all(bearing_groups):
-        return []
-
     goal_sector = sector_heading(goal_axis) if goal_axis is not None else None
     headings = HEADINGS if requested is None else (sector_heading(requested),)
+    if review is not None:
+        review.update(kind='recommendation', rows=direction_rows('not_requested'))
     results = []
     for heading in headings:
+        row = review['rows'][heading] if review is not None else {}
+        row['status'] = 'goal_direction'
         core = (heading,)
         adjacent = ((heading - 10) % 360, heading, (heading + 10) % 360)
         for allowed in (core, adjacent):
@@ -45,10 +50,14 @@ def corridor_options(groups: list[list[dict]], activities: list[dict], request: 
                 continue
             scoped = [[group for group, sector in options if sector is None or sector in allowed]
                       for options in bearing_groups]
-            if not all(scoped):
+            if not scoped or not all(scoped):
+                if row['status'] != 'schedule':
+                    row.update(status='missing_clusters', missing=[a.get('request_term') or a.get('keyword') or a['category']
+                                                                  for a, options in zip(activities, scoped) if not options])
                 continue
             beams = find_courses(scoped)
             if beams:
+                row.update(status='candidate', missing=[])
                 pooled = len(allowed) > 1
                 results.append({**beams[0], 'corridor': {
                     'heading': heading, 'variant': 'adjacent' if pooled else 'primary',
@@ -56,6 +65,7 @@ def corridor_options(groups: list[list[dict]], activities: list[dict], request: 
                     'sectors': list(allowed),
                 }})
                 break
+            row.update(status='schedule', missing=[])
     return results
 
 

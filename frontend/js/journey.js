@@ -3,6 +3,8 @@
   'use strict';
   const COLORS = ['#b7791f', '#21877c', '#526ac0', '#a65885', '#547c52'];
   const ROUTE_COLORS = ['#1665c1', '#ba4536', '#138064', '#7c459e', '#ae690d'];
+  const REFERENCE_COLOR = '#b71931';
+  const REFERENCE_ROUTE_COLORS = [REFERENCE_COLOR, '#176c8a', '#7352a8', '#9a6508', '#397044'];
   const NAMES = { hiking:'등산', swimming:'수영', restaurant:'식사', shower:'샤워', bowling:'볼링',
     meeting:'약속', cafe:'카페', shopping:'쇼핑', pub:'술자리', subway_station:'지하철', return_home:'귀가',
     history_museum:'역사 박물관', palace:'고궁', market_food:'시장 먹거리', baseball_game:'야구 경기 관람',
@@ -80,6 +82,7 @@
       if (startMinute != null && endMinute != null && endMinute < startMinute) endMinute += 1440;
       return {index:i, activityId:activity.id, name:NAMES[activity.category] || activity.category,
         place, point, clusters, color:data.routeColor || COLORS[i % COLORS.length], time, startMinute, endMinute,
+        warning: row?.visit_warning || place?.visit_warning,
         conflict:(route?.schedule?.conflicts || []).some(c => c.activity_id === activity.id)};
     });
     // 자정 이후에도 방문 순서를 유지한다. 충돌이 있어도 요청 순서를 임의로 정렬하지 않는다.
@@ -129,12 +132,16 @@
     return [path[mid], path[mid + 1]];
   }
 
+  function routeColor(route, index) {
+    return route?.reference ? REFERENCE_ROUTE_COLORS[(route.reference_rank || 1) - 1] : ROUTE_COLORS[index];
+  }
+
   // 겹치는 구간은 넓은 선부터 포개 두어 여러 추천의 색이 모두 보이게 한다.
   function routeLayers(data, selected, filter) {
     const groups = new Map();
     (data.routes || []).forEach((route, index) => {
       if (filter !== 'all' && route !== selected) return;
-      const color = ROUTE_COLORS[index];
+      const color = routeColor(route, index);
       const segments = build({...data, route, routeColor:color}).segments;
       segments.filter(s => visible(s.index, filter)).forEach(segment => {
         const key = segment.network
@@ -181,7 +188,7 @@
         return `<circle cx="${center.x}" cy="${center.y}" r="${Math.abs(edge.y - center.y)}" fill="${s.color}" fill-opacity=".06" stroke="${s.color}" stroke-opacity=".3"><title>${esc(s.time)} ${esc(s.name)} 후보 ${g.size}곳</title></circle>`;
       }).join('');
       return `${groups}<g class="journey-stop" data-start="${s.startMinute ?? ''}" data-end="${s.endMinute ?? ''}" style="--journey-color:${s.color}">
-        <title>${s.index + 1}. ${esc(s.time)} ${esc(s.name)} · ${esc(s.place.name)}${s.conflict ? ' · 시간 충돌' : ''}</title>
+        <title>${s.index + 1}. ${esc(s.time)} ${esc(s.name)} · ${esc(s.place.name)}${s.warning ? ` · ${esc(s.warning.reason)}` : s.conflict ? ' · 시간 충돌' : ''}</title>
         <circle class="journey-number" cx="${p.x}" cy="${p.y}" r="8" fill="white" stroke="${s.color}" stroke-width="2"/>
         <text x="${p.x}" y="${p.y + 3}" text-anchor="middle" fill="${s.color}" font-size="9" font-weight="700">${s.index + 1}</text>
         <text class="journey-svg-time" x="${p.x + (left ? -11 : 11)}" y="${p.y + (below ? 18 : -10)}" text-anchor="${left ? 'end' : 'start'}" fill="${s.color}">${esc(s.time)}${s.conflict ? ' !' : ''}</text></g>`;
@@ -198,5 +205,5 @@
   }
 
   global.SeoulJourney = {build, cluster, distance, visible, renderSvg, highlight, esc,
-    ROUTE_COLORS, routeLayers, renderRouteLayers, nodePoint, segmentKey, pathsFor, arrowSegment};
+    ROUTE_COLORS, REFERENCE_COLOR, routeColor, routeLayers, renderRouteLayers, nodePoint, segmentKey, pathsFor, arrowSegment};
 })(window);

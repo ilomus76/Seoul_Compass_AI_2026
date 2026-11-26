@@ -4,7 +4,7 @@ from typing import Dict, List
 from .direction import calculate_bearing, get_direction, haversine
 from .place_clusters import CANDIDATE_POOL_LIMIT, cluster_places
 from .places import find_by_keywords, search_places
-from .route_corridor import corridor_options, recommendation_rank
+from .route_corridor import corridor_options, direction_rows, point_bearing, recommendation_rank, sector_heading
 from .schedule import travel_minutes, validate_schedule
 from .scoring import normalize_weights, score_place
 
@@ -50,6 +50,79 @@ def recommend_distinct_meals(beams: List[Dict], meal_index: int) -> List[Dict]:
     return selected[:TOP_N]
 
 
+def reference_rank(beam: dict, activities: list[dict]) -> tuple:
+    legs = [(left, right) for activity, left, right in zip(activities[1:], beam['nodes'], beam['nodes'][1:])
+            if not activity.get('fixed_location') and activity['category'] not in ('return_to_current', 'return_to_start')]
+    same_venue = sum(bool(left['place'].get('event_warning') and left['place'].get('address')
+                          and left['place']['address'] == right['place'].get('address')) for left, right in legs)
+    overlapping = sum(right['travel_minutes'] == 0 for _, right in legs)
+    return (beam['conflicts'], same_venue, overlapping, *recommendation_rank(beam))
+
+
+def select_reference_directions(beams: list[dict], index: int | None, center: dict,
+                                groups: list[list[dict]], activities: list[dict], review: dict | None) -> list[dict]:
+    """기준 방문점에서 갈라지는 10° 구역마다 최상위 참고 동선 하나를 선택한다."""
+    eligible = [beam for beam in beams if beam['has_visit_warning']]
+    if index is None:
+        return eligible[:1]
+    if review is not None:
+        origins = groups[index - 1] if index else []
+        base = (origins[0]['representative']['name'] if len(origins) == 1 else '직전 방문점') if index else center.get('name')
+        activity = activities[index]
+        review.update(kind='reference', base=base, activity=activity.get('request_term') or activity.get('keyword') or activity['category'],
+                      rows=direction_rows('missing_clusters'))
+        for origin in origins or [{'center': {'lat':center['latitude'], 'lng':center['longitude']}}]:
+            pivot = {'latitude':origin['center']['lat'], 'longitude':origin['center']['lng']}
+            for group in groups[index]:
+                bearing = point_bearing(pivot, group['center'])
+                if bearing is not None:
+                    review['rows'][sector_heading(bearing)]['status'] = 'no_combination'
+    selected, seen_headings, seen_places = [], set(), set()
+    for beam in eligible:
+        nodes = beam['nodes']
+        pivot = nodes[index - 1]['cluster']['center'] if index else None
+        origin = {'latitude': pivot['lat'], 'longitude': pivot['lng']} if pivot else center
+        bearing = point_bearing(origin, nodes[index]['cluster']['center'])
+        if bearing is None:
+            continue
+        heading = sector_heading(bearing)
+        place = meal_cluster(beam, index)
+        if heading in seen_headings:
+            continue
+        row = review['rows'][heading] if review is not None else {}
+        if row.get('status') == 'rank_limit':
+            continue
+        row.pop('walking_leg', None)
+        row.update(place=nodes[index]['place']['name'], distance_km=round(sum(node['distance_km'] for node in nodes), 2),
+                   leg_km=nodes[index]['distance_km'], leg_minutes=nodes[index]['travel_minutes'] if index else None)
+        if review is not None and index:
+            previous, current = nodes[index - 1]['place'], nodes[index]['place']
+            if all(p.get('source') in ('kakao', 'sbiz') for p in (previous, current)):
+                direct = haversine(previous['lat'], previous['lng'], current['lat'], current['lng'])
+                if direct > .001:
+                    row['walking_leg'] = {'start': {'lat': previous['lat'], 'lng': previous['lng']},
+                                          'end': {'lat': current['lat'], 'lng': current['lng']},
+                                          'straight_km': round(direct, 3)}
+        if place in seen_places:
+            row.update(status='duplicate_cluster')
+            continue
+        if len(selected) == TOP_N:
+            factors = ('일정 충돌 수', '이전 장소와 같은 주소', '겹치는 경유 구간', '요청 메뉴 일치',
+                       '장소의 세부 조건', '추정 이동시간', '직선 연결 거리', '방향 범위')
+            candidate = reference_rank(beam, activities)
+            cutoff = reference_rank(selected[-1], activities)
+            driver = next((factor for factor, a, b in zip(factors, candidate, cutoff) if a != b), None)
+            row.update(status='rank_limit', factor=driver)
+            continue
+        seen_headings.add(heading)
+        seen_places.add(place)
+        selected.append({**beam, 'reference_heading': heading})
+        row.update(status='selected', rank=len(selected))
+        if len(selected) == TOP_N and review is None:
+            break
+    return selected or eligible[:1]
+
+
 def route_score(nodes: List[Dict], interests: List[str], weights: Dict) -> float:
     """R = 0.35U + 0.25T + 0.20C + 0.20Q"""
     if not nodes:
@@ -64,7 +137,8 @@ def route_score(nodes: List[Dict], interests: List[str], weights: Dict) -> float
 
 
 def recommend_routes(request: Dict, candidate_groups: List[List[Dict]] | None = None,
-                     include_infeasible: bool = False, preview: bool = False) -> List[Dict]:
+                     include_infeasible: bool = False, preview: bool = False,
+                     reference: bool = False, direction_review: dict | None = None) -> List[Dict]:
     """장소 조합을 중복 없이 골라 활동 순서를 유지한다."""
     start = request.get("start_location", {})
     center = request.get('search_center') or start
@@ -105,6 +179,8 @@ def recommend_routes(request: Dict, candidate_groups: List[List[Dict]] | None = 
         if act.get('category') == 'swimming':
             places = [p for p in places if p['category'] == 'swimming']
         places = list({p["id"]: p for p in places}.values())
+        if preview and not reference:
+            places = [p for p in places if not p.get('visit_warning')]
         # 방향 탐색 확장은 선택 반경 안에서만 수행한다. 반경을 임의로 늘리지 않는다.
         scored = []
         for place in places:
@@ -129,20 +205,33 @@ def recommend_routes(request: Dict, candidate_groups: List[List[Dict]] | None = 
         clusters.sort(key=lambda group: haversine(lat, lng, group['center']['lat'], group['center']['lng']))
         candidates_per_activity.append(clusters if contextual else clusters[:BEAM_WIDTH])
 
-    if contextual:
+    if reference:
+        # 식사 후보가 여러 군집이면 식사를 기준으로 비교하고, 그 외에는 먼저 갈라지는 활동을 쓴다.
+        flexible = [i for i, (activity, groups) in enumerate(zip(activities, candidates_per_activity))
+                    if groups and not activity.get('fixed_location')
+                    and activity['category'] not in ('return_to_current', 'return_to_start')]
+        varying = [i for i in flexible if len(candidates_per_activity[i]) > 1]
+        if meal_index in varying:
+            reference_index = meal_index
+        else:
+            reference_index = next(iter(varying or flexible), None)
+        beams = search_sequences(candidates_per_activity, activities, start, mode, request, interests,
+                                 weights, meal_index=reference_index, include_infeasible=True, preview=preview, reference=True)
+        final_beams = select_reference_directions(beams, reference_index, center, candidates_per_activity, activities, direction_review)
+    elif contextual:
         def find_courses(groups):
             return search_sequences(groups, activities, start, mode, request, interests, weights,
                                     meal_index=None, include_infeasible=False, preview=preview)
-        final_beams = corridor_options(candidates_per_activity, activities, request, find_courses)
+        final_beams = corridor_options(candidates_per_activity, activities, request, find_courses, direction_review)
     else:
         beams = search_sequences(candidates_per_activity, activities, start, mode, request, interests,
                                  weights, meal_index, include_infeasible, preview, candidate_groups is not None)
         final_beams = recommend_distinct_meals(beams, meal_index) if meal_index is not None else beams[:TOP_N]
-    return build_routes(final_beams, activities, request, preview)
+    return build_routes(final_beams, activities, request, preview, reference)
 
 
 def search_sequences(groups, activities, start, mode, request, interests, weights,
-                     meal_index, include_infeasible, preview, live_candidates=False):
+                     meal_index, include_infeasible, preview, live_candidates=False, reference=False):
     """각 시간 단계에서 다음 군집으로 이어질 상위 경로 조합을 유지한다."""
     beams: List[Dict] = [{"nodes": [], "score": 0.0,
                          "last": {"lat": start['latitude'], "lng": start['longitude']}}]
@@ -168,8 +257,13 @@ def search_sequences(groups, activities, start, mode, request, interests, weight
                 }
                 nodes = beam["nodes"] + [node]
                 timing = None if preview else validate_schedule(
-                    activities[:len(nodes)], {'nodes': nodes, 'departure_time': request.get('departure_time')}
+                    activities[:len(nodes)], {'nodes': nodes, 'departure_time': request.get('departure_time'),
+                                               'travel_date': request.get('travel_date')}
                 )
+                has_visit_warning = any(conflict.get('kind') == 'visit_unavailable' for conflict in timing['conflicts']) if timing else any(
+                    node['place'].get('visit_warning') or node['place'].get('event_warning') for node in nodes)
+                if not reference and timing and has_visit_warning:
+                    continue
                 if not include_infeasible and timing and not timing['feasible']:
                     continue
                 next_beams.append({
@@ -177,8 +271,11 @@ def search_sequences(groups, activities, start, mode, request, interests, weight
                     "score": route_score(nodes, interests, weights),
                     "last": point,
                     "conflicts": len(timing['conflicts']) if timing else 0,
+                    "has_visit_warning": has_visit_warning,
                 })
-        if contextual:
+        if reference:
+            next_beams.sort(key=lambda beam: reference_rank(beam, activities))
+        elif contextual:
             next_beams.sort(key=recommendation_rank)
         elif preview:
             next_beams.sort(key=lambda b: sum(n['distance_km'] for n in b['nodes']))
@@ -187,7 +284,9 @@ def search_sequences(groups, activities, start, mode, request, interests, weight
                                           sum(n['distance_km'] for n in b['nodes'])))
         else:
             next_beams.sort(key=lambda b: b["score"], reverse=True)
-        if contextual and activity_index < len(groups) - 1:
+        if reference and meal_index is not None and activity_index >= meal_index:
+            beams = keep_meal_alternatives(next_beams, meal_index)
+        elif contextual and activity_index < len(groups) - 1:
             counts = {}
             beams = []
             for beam in next_beams:
@@ -203,12 +302,13 @@ def search_sequences(groups, activities, start, mode, request, interests, weight
     return beams
 
 
-def build_routes(final_beams, activities, request, preview):
+def build_routes(final_beams, activities, request, preview, reference=False):
     routes = []
     for beam in final_beams:
         route = {
             'departure_time': request.get('departure_time'),
-            "nodes": beam["nodes"],
+            'travel_date': request.get('travel_date'),
+            "nodes": [dict(node) for node in beam['nodes']],
             "score": beam["score"],
             "total_distance_km": round(sum(n["distance_km"] for n in beam["nodes"]), 2),
             "total_travel_minutes": sum(n["travel_minutes"] for n in beam["nodes"]),
@@ -225,5 +325,17 @@ def build_routes(final_beams, activities, request, preview):
             route['nodes'] = [{**node, 'travel_minutes': None} for node in route['nodes']]
         else:
             route["schedule"] = validate_schedule(activities, route)
+        if reference:
+            route['reference'] = True
+            if 'reference_heading' in beam:
+                heading = beam['reference_heading']
+                route.update(reference_heading=heading, reference_direction=get_direction(heading))
+        timeline = (route['schedule'] or {}).get('timeline', [])
+        for index, node in enumerate(route['nodes']):
+            warning = timeline[index]['visit_warning'] if timeline else (node['place'].get('visit_warning') or node['place'].get('event_warning'))
+            if warning:
+                node['place'] = {**node['place'], 'visit_warning': warning}
+            elif node['place'].get('visit_warning'):
+                node['place'] = {key: value for key, value in node['place'].items() if key != 'visit_warning'}
         routes.append(route)
     return routes

@@ -15,8 +15,8 @@ from .merchant_catalog import industry_match, merge_merchants, search_merchants
 from .optimizer import recommend_routes
 from .places import load_places
 from .place_clusters import CANDIDATE_POOL_LIMIT, cluster_places
-from .route_corridor import HEADINGS, unique_courses
-from .schedule import to_minutes, to_clock, travel_minutes
+from .route_corridor import HEADINGS, direction_rows, recommendation_rank, sector_heading, unique_courses
+from .schedule import availability_warning, to_minutes, to_clock, travel_minutes
 from .venue_details import annotate_menus, name_key
 
 # 좌표나 시설을 만들지 않고, 이 이름으로 API에 존재하는 입구를 조회한다.
@@ -288,7 +288,7 @@ def fixed_candidate(activity: dict, existing: list, center: dict, radius: float,
 
 def context_candidates(center: dict | None, activity: dict, radius: float, scope: str | None,
                        start: dict | None = None, existing: list | None = None,
-                       return_location: dict | None = None) -> list[dict]:
+                       return_location: dict | None = None, *, include_venue_query: bool = False) -> list[dict]:
     """모델이 해석한 검색어로 찾되 군집에 쓰는 좌표는 실제 장소 조회에서만 가져온다."""
     category = activity['category']
     terms = activity.get('menu_terms', [])
@@ -305,7 +305,8 @@ def context_candidates(center: dict | None, activity: dict, radius: float, scope
         industries = activity.get('industry_terms', [])
         query_alternates = activity.get('search_queries', [])
         venue_query = CONTEXT_QUERIES.get(category) or activity.get('venue_kind')
-        queries = dict.fromkeys(query for query in (specific, *query_alternates) if query)
+        queries = dict.fromkeys(query for query in (venue_query if include_venue_query else None,
+                                                   specific, *query_alternates) if query)
         if not queries and venue_query:
             queries = {venue_query: None}
         candidates = []
@@ -420,10 +421,14 @@ def recommend_regions(request: Dict) -> Dict:
             issues.append('API 키가 없어 데모 데이터만 비교했습니다.')
         if not contextual and explicit_center and activities[0]['category'] == 'hiking' and not anchor.get('entry_confirmed'):
             issues.append('산의 위치만 확인했습니다. 실제 등산로 입구 선택이 필요합니다.')
-        for activity in activities[len(groups):]:
+        for index, activity in enumerate(activities[len(groups):], start=len(groups)):
             try:
                 if contextual:
-                    places = context_candidates(center, activity, radius, scope, start, existing, return_location)
+                    # 관람 일정 미확인 시 구장 안 매장과 주변 업소를 함께 비교한다.
+                    event_meal = (activity['category'] == 'restaurant' and index > 0
+                                  and bool(activities[index - 1].get('visit_warning')))
+                    places = context_candidates(center, activity, radius, scope, start, existing, return_location,
+                                               include_venue_query=event_meal)
                 elif explicit_center and activity.get('fixed_location') and activity.get('location') == explicit_center.get('name'):
                     places = [{**anchor, 'category': activity['category']}]
                 elif explicit_center:
@@ -434,9 +439,23 @@ def recommend_regions(request: Dict) -> Dict:
                 places = []
                 issues.append(str(error))
             groups.append(places)
+        for index, (activity, places) in enumerate(zip(activities, groups)):
+            start_minute = to_minutes(activity.get('start_time'))
+            duration = activity.get('duration_minutes')
+            end_minute = start_minute + duration if start_minute is not None and duration is not None else None
+            checked = []
+            for place in places:
+                row = dict(place)
+                if activity.get('visit_warning'):
+                    row['event_warning'] = activity['visit_warning']
+                warning = availability_warning(row, request.get('travel_date'), start_minute, end_minute)
+                if warning:
+                    row['visit_warning'] = warning
+                checked.append(row)
+            groups[index] = checked
         missing = [a.get('keyword') or a['category'] for a, group in zip(activities, groups)
                    if a.get('required', True) and not group]
-        covered = sum(bool(group) for group in groups)
+        covered = sum(any(not p.get('visit_warning') for p in group) for group in groups)
         first_leg = {'status': 'needs_origin' if needs_origin else 'estimate',
                      'planned_departure': request.get('departure_time'), 'estimated_minutes': None}
         plan_activities = [dict(a) for a in activities]
@@ -457,18 +476,46 @@ def recommend_regions(request: Dict) -> Dict:
             issues.append('현재 위치 또는 직접 선택한 위치가 있어야 출발·복귀 구간과 시간표를 계산할 수 있습니다.')
         # 출발지를 모르면 목적지 내부 조합만 비교하며 첫 이동과 시간표는 만들지 않는다.
         comparison_start = start or {'latitude': anchor['lat'], 'longitude': anchor['lng']}
-        routes = recommend_routes({**request, 'activities': plan_activities, 'start_location': comparison_start,
-                                   'search_center': search_center},
-                                  groups, include_infeasible=True, preview=needs_origin) if not missing else []
+        route_request = {**request, 'activities': plan_activities, 'start_location': comparison_start,
+                         'search_center': search_center}
+        base_name = ('출발지' if comparison_start.get('type') in ('current_location', 'custom', 'map')
+                     else comparison_start.get('name') or search_center['name'])
+        recommendation_review = {'base': base_name}
+        if contextual and missing:
+            requested = request.get('requested_bearing')
+            directions = HEADINGS if requested is None else (sector_heading(requested),)
+            rows = direction_rows('not_requested')
+            for heading in directions:
+                rows[heading].update(status='missing_clusters', missing=missing)
+            recommendation_review.update(kind='recommendation', rows=rows)
+        routes = recommend_routes(route_request, groups, include_infeasible=True, preview=needs_origin,
+                                  direction_review=recommendation_review if contextual else None) if not missing else []
+        # 방문이 어려운 지점도 지도에서 확인할 수 있도록 방문 순서대로 참고 동선을 만든다.
+        prefix = next((i for i, group in enumerate(groups) if not group), len(groups))
+        reference_groups = groups[:prefix]
+        warned = next((i for i, group in enumerate(reference_groups) if any(p.get('visit_warning') for p in group)), None)
+        references = []
+        reference_review = {}
+        if warned is not None or (not routes and any(p.get('operating_hours') for g in reference_groups for p in g)):
+            if warned is not None:
+                reference_groups[warned] = [p for p in reference_groups[warned] if p.get('visit_warning')]
+            references = recommend_routes({**route_request, 'activities': plan_activities[:prefix]},
+                                          reference_groups, preview=needs_origin, reference=True, direction_review=reference_review)
+            for rank, route in enumerate(references, 1):
+                route.update(reference_rank=rank, partial=prefix < len(groups))
+            if references and references[0]['partial']:
+                issues.append('확인된 경유지까지의 참고 동선입니다. 빠진 구간은 장소 또는 위치를 확인해 주세요.')
         if contextual and not routes and not missing:
             issues.append('검색한 활동 군집으로 방향 범위와 일정 조건을 함께 충족하는 경로가 없습니다.')
         # 정상 추천과 혼동되지 않도록 검토용 일정에 확인 상태를 명시한다.
         draft = routes[0] if routes and not needs_origin else None
-        for route in routes:
+        for route in routes + references:
             route_issues = list(issues)
             for activity, node in zip(activities, route['nodes']):
                 place = node['place']
-                if not place.get('hours') and activity['category'] not in ('return_to_start', 'return_to_current'):
+                if place.get('visit_warning'):
+                    route_issues.append(f"{place['name']}: {place['visit_warning']['reason']}")
+                elif not place.get('operating_hours') and activity['category'] not in ('return_to_start', 'return_to_current'):
                     route_issues.append(f"{place['name']}: 방문일 영업시간·이용 가능 여부 확인 필요")
                 if activity['category'] == 'swimming':
                     route_issues.append(f"{place['name']}: 자유수영 시간·입장 조건·환복시간 확인 필요")
@@ -492,6 +539,13 @@ def recommend_regions(request: Dict) -> Dict:
         if draft:
             issues = draft['cautions']
         flat = {p['id']: p for group in groups for p in group}
+        for group in groups:
+            flat.update((p['id'], p) for p in group if p.get('visit_warning'))
+        for reference in references:
+            for node in reference['nodes']:
+                place = node['place']
+                if place.get('visit_warning'):
+                    flat[place['id']] = place
         for place in flat.values():
             place['bearing'] = calculate_bearing(center['lat'], center['lng'], place['lat'], place['lng'])
             place['direction'] = get_direction(place['bearing'])
@@ -500,12 +554,15 @@ def recommend_regions(request: Dict) -> Dict:
                 'first_leg': first_leg,
                 'evaluated_activities': plan_activities,
                 'coverage_percent': round(covered / len(activities) * 100), 'missing_activities': missing,
-                'status': 'needs_origin' if needs_origin else 'missing_places' if missing else ('no_corridor' if contextual and not routes else
+                'status': 'reference_available' if references and not routes else 'needs_origin' if needs_origin else 'missing_places' if missing else ('no_corridor' if contextual and not routes else
                            'missing_places' if not routes else 'needs_origin' if needs_origin else
                            'time_conflict' if draft and draft['schedule']['conflicts'] else 'needs_confirmation'),
                 'candidate_groups': [{'activity_id': a['id'], 'category': a['category'], 'places': group}
                                      for a, group in zip(activities, groups)],
-                'draft_route': draft, 'routes': routes, 'places': list(flat.values()), 'checks_needed': issues,
+                'draft_route': draft, 'routes': routes, 'reference_routes': references,
+                'reference_route': references[0] if references else None,
+                'direction_reviews': [review for review in (recommendation_review, reference_review) if review.get('rows')],
+                'places': list(flat.values()), 'checks_needed': issues,
                 'radius_km': radius}
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -516,6 +573,17 @@ def recommend_regions(request: Dict) -> Dict:
         for rank, route in enumerate(ranked, 1):
             route['rank'] = rank
         for region in regions:
+            recommendation_review = next((item for item in region['direction_reviews'] if item['kind'] == 'recommendation'), None)
+            if recommendation_review is not None:
+                for route in region['routes']:
+                    row = recommendation_review['rows'][route['corridor']['heading']]
+                    rank = route.get('rank')
+                    row.update(status='selected' if rank is not None and rank <= 5 else 'rank_limit' if rank is not None else 'duplicate_route',
+                               rank=rank, distance_km=route['total_distance_km'], minutes=route['total_travel_minutes'])
+                    if rank is not None and rank > 5:
+                        factors = ('요청 메뉴 일치', '장소의 세부 조건', '추정 이동시간', '직선 연결 거리', '방향 범위')
+                        row['factor'] = next((name for name, a, b in zip(factors, recommendation_rank(route),
+                                                                       recommendation_rank(recommendations[-1])) if a != b), None)
             region['routes'] = [route for route in recommendations if route['region_id'] == region['id']]
             region['draft_route'] = next((route for route in region['routes'] if not route.get('preview')), None)
         regions.sort(key=lambda region: (not region['routes'],

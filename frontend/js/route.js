@@ -85,13 +85,51 @@
     return /^\+?\d{8,13}$/.test(number) ? ` · <a href="tel:${number}">${esc(value)}</a>` : '';
   }
 
+  function operatingHours(place) {
+    const hours = place.operating_hours;
+    return [hours?.hours, hours?.holidays, hours?.source && `출처 ${hours.source}`].filter(Boolean).join(' · ')
+      || place.hours || '영업시간 확인 필요';
+  }
+
+  function visitPlaceLink(place) {
+    const name = esc(place.name);
+    const color = place.visit_warning ? ' class="visit-warning"' : '';
+    return /^https?:\/\//i.test(place.place_url || '')
+      ? `<a${color} href="${esc(place.place_url)}" target="_blank" rel="noopener noreferrer">${name}</a>`
+      : `<strong${color}>${name}</strong>`;
+  }
+
+  function visitWarning(warning) {
+    if (!warning) return '';
+    const source = esc(warning.source || '공식 안내');
+    const link = /^https?:\/\//i.test(warning.source_url || '')
+      ? ` · <a href="${esc(warning.source_url)}" target="_blank" rel="noopener noreferrer">${source}</a>`
+      : warning.source ? ` · ${source}` : '';
+    return `<span class="visit-warning visit-warning-detail">${esc(warning.reason)}${link}</span>`;
+  }
+
+  function referenceCourse(route, selected, regionIndex, start, routeIndex = 0) {
+    if (!route) return '';
+    const places = stopLabels(route, start);
+    const offset = places.length - route.nodes.length;
+    const stops = places.map((name, i) => route.nodes[i - offset]?.place.visit_warning
+      ? `<strong class="visit-warning">${esc(name)}</strong>` : esc(name));
+    const color = global.SeoulJourney.routeColor(route, routeIndex);
+    const direction = Number.isFinite(route.reference_heading)
+      ? ` · ${esc(route.reference_direction)} ${route.reference_heading}°` : '';
+    return `<div class="reference-course" style="--reference-color:${color}">
+      <button class="ghost select-reference" type="button" data-region="${regionIndex}" data-route="${routeIndex}" aria-pressed="${route === selected}">참고 ${routeIndex + 1}${direction}</button>
+      <p>${stops.join(' → ')}</p>
+      <p>${route.partial ? '확인된 구간까지 표시 · ' : ''}${route.preview ? '현재 위치 적용 후 출발·복귀 계산 · ' : ''}빨간 장소의 방문 조건을 확인해 주세요.</p>
+    </div>`;
+  }
+
   function venueDetails(route) {
     const venues = route?.nodes.map(node => node.place).filter(place =>
       !place.food_options?.length && (place.merchant || place.menu_status || place.phone || place.place_url)) || [];
     if (!venues.length) return '';
     return `<div class="market-food-options"><strong>선택 코스 장소 정보</strong><ul>${venues.map(place => {
-      const title = /^https?:\/\//i.test(place.place_url || '')
-        ? `<a href="${esc(place.place_url)}" target="_blank" rel="noopener noreferrer">${esc(place.name)}</a>` : esc(place.name);
+      const title = visitPlaceLink(place);
       const menus = place.menus?.length ? ` · ${esc(place.menus.join(' / '))} (${esc(place.menu_source)})` : '';
       const check = ['unconfirmed', 'unavailable'].includes(place.menu_status) ? ' · 메뉴 확인 필요' : '';
       const industry = place.merchant?.industry ? ` · ${esc(place.merchant.industry)} (상권정보)` : '';
@@ -127,10 +165,11 @@
       event.source_url ? ` · ${safeLink(event.source_url, event.source || '일정 출처')}` : ''}</li>`).join('');
     const linkRows = officialLinks.map(link => safeLink(link.url, link.label)).filter(Boolean).map(link => `<li>${link}</li>`).join('');
     const message = error || (needsConfirmation && parsed.location_context.error);
-    container.innerHTML = `<h3>${title}</h3>${message ? `<p>${esc(message)}</p>` : ''}${eventRows ? `<ul>${eventRows}</ul>` : ''}${
+    container.innerHTML = `<h3>${title}</h3>${message ? `<p class="visit-warning">${esc(message)}</p>` : ''}${eventRows ? `<ul>${eventRows}</ul>` : ''}${
       needsConfirmation && eventRows ? '<p>원하는 날짜와 경기 또는 행사를 질문에 적고 다시 분석하세요.</p>' : ''}${
       linkRows ? `<ul>${linkRows}</ul>` : ''}`;
   }
 
-  global.SeoulRouteView = { render, renderReport, recommendationList, renderEventNotice, venuePhone, venueDetails };
+  global.SeoulRouteView = {render, renderReport, recommendationList, renderEventNotice, venuePhone, venueDetails,
+    operatingHours, visitPlaceLink, visitWarning, referenceCourse};
 })(window);

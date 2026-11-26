@@ -1,4 +1,4 @@
-"""공개 상점 정보가 같은 시설로 확인될 때만 TourAPI 메뉴를 연결한다."""
+"""공개 상점 정보가 같은 시설로 확인될 때만 TourAPI 메뉴와 운영시간을 연결한다."""
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -46,29 +46,34 @@ def tour_items(operation: str, **query) -> list[dict]:
 
 
 @lru_cache(maxsize=256)
-def confirmed_menus(name: str, lat: float, lng: float, phone: str) -> tuple[str, ...]:
+def confirmed_food_intro(name: str, lat: float, lng: float, phone: str) -> dict:
     results = tour_items('searchKeyword2', keyword=name, numOfRows=10)
     ids = {p['contentid'] for p in results if p.get('contentid') and same_venue(p, name, lat, lng, phone)}
     if len(ids) != 1:
-        return ()
+        return {}
     intro = tour_items('detailIntro2', contentId=next(iter(ids)))
-    menus = (row.get(field) for row in intro for field in ('firstmenu', 'treatmenu'))
-    return tuple(dict.fromkeys(str(menu).strip() for menu in menus if menu))
+    return intro[0] if intro else {}
 
 
 def annotate_menus(places: list[dict], terms: list[str], *, limit: int = 5) -> list[dict]:
     def enrich(pair):
         i, place = pair
-        menus = ()
+        intro = {}
         if TOUR_API_KEY and place.get('source') == 'kakao' and i < limit:
             try:
-                menus = confirmed_menus(place['name'], place['lat'], place['lng'], public_phone(place.get('phone')))
+                intro = confirmed_food_intro(place['name'], place['lat'], place['lng'], public_phone(place.get('phone')))
             except (ValueError, OSError, TypeError, KeyError):
                 pass
+        menus = list(dict.fromkeys(str(intro[field]).strip() for field in ('firstmenu', 'treatmenu') if intro.get(field)))
+        hours = re.sub(r'\s*<br\s*/?>\s*', ' / ', str(intro.get('opentimefood') or ''), flags=re.I).strip()
+        holidays = re.sub(r'\s*<br\s*/?>\s*', ' / ', str(intro.get('restdatefood') or ''), flags=re.I).strip()
+        operating = {'hours': hours, 'holidays': holidays, 'source': '한국관광공사',
+                     'source_url': 'https://www.data.go.kr/data/15101578/openapi.do'} if hours or holidays else None
         menu_text = name_key(' '.join(menus))
         matched = [term for term in terms if name_key(term) and name_key(term) in menu_text]
         status = 'matched' if terms and len(matched) == len(terms) else 'unconfirmed' if terms else 'published' if menus else 'unavailable'
-        return {**place, 'menus': list(menus), 'menu_status': status, 'matched_menu_terms': matched,
+        return {**place, 'menus': menus, 'menu_status': status, 'matched_menu_terms': matched,
+                'operating_hours': operating,
                 'menu_source': '한국관광공사' if menus else None}
 
     if not TOUR_API_KEY:

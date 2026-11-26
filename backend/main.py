@@ -37,7 +37,8 @@ def parse(req: ParseRequest) -> Dict:
     fallback = req.fallback_location.model_dump() if req.fallback_location else None
     if req.analysis_mode == 'context' or (req.analysis_mode is None and CONTEXT_LLM_ENABLED):
         try:
-            return context_parser.resolve_intent(context_parser.analyze_text(req.text), fallback, req.fallback_radius_km)
+            return context_parser.resolve_intent(context_parser.analyze_text(req.text), fallback, req.fallback_radius_km,
+                                                 request_text=req.text)
         except context_parser.ContextAnalysisError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
     result = apply_location_context(ai_parser.parse_user_request(req.text), req.text, fallback, req.fallback_radius_km)

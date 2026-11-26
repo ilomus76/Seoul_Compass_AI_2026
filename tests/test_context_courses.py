@@ -2,6 +2,7 @@ import io
 import json
 import math
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -88,6 +89,66 @@ class DirectionCoursesTests(unittest.TestCase):
         self.assertEqual([course['rank'] for course in data['recommendations']], [1, 2, 3, 4, 5])
         self.assertEqual(data['regions'][0]['routes'], data['recommendations'])
         self.assertEqual([course['rank'] for course in data['alternative_routes']], list(range(6, 37)))
+        rows = data['regions'][0]['direction_reviews'][0]['rows'].values()
+        self.assertEqual(sum(row['status'] == 'selected' for row in rows), 5)
+        self.assertEqual(sum(row['status'] == 'rank_limit' for row in rows), 31)
+
+    @patch('backend.region_planner.context_candidates')
+    def test_closed_candidate_stays_on_map_and_has_a_complete_reference_course(self, candidates):
+        closed = {**place('저녁 식당', 0), 'operating_hours': {'hours': '18:00~22:00', 'source': '한국관광공사'}}
+        opened = {**place('점심 식당', 0, .4), 'operating_hours': {'hours': '11:00~15:00'}}
+        cafe = place('카페', 0, .6)
+        candidates.side_effect = [[closed, opened], [cafe]]
+        data = region_recommend(RegionRecommendRequest(search_center=self.start, start_location=self.start,
+                                travel_date='2026-12-04', contextual=True,
+                                activities=[activity('restaurant', 1, start_time='12:00', fixed_time=True),
+                                            activity('cafe', 2, start_time='14:00', fixed_time=True)]))
+        region = data['regions'][0]
+        self.assertEqual(data['recommendations'][0]['nodes'][0]['place']['name'], '점심 식당')
+        reference = region['reference_route']
+        self.assertTrue(reference['reference'])
+        self.assertEqual([node['place']['name'] for node in reference['nodes']], ['저녁 식당', '카페'])
+        self.assertIn('영업시간', reference['nodes'][0]['place']['visit_warning']['reason'])
+        self.assertIn('visit_warning', next(p for p in region['places'] if p['name'] == '저녁 식당'))
+
+    def test_reference_course_prefers_drawable_leg_when_meal_location_is_flexible(self):
+        stadium = {**place('경기장', 0, .2), 'address': '경인로 430', 'event_warning': {'reason': '경기 미확인'}}
+        onsite = {**stadium, 'id': 'inside', 'name': '구장 안 식당'}
+        indoor_alternative = {**place('구장 2층 식당', 0, .28), 'address': stadium['address']}
+        nearby = place('주변 식당', 0, .5)
+        activities = [activity('baseball_game', 1), activity('restaurant', 2)]
+        request = {'start_location': self.start, 'contextual': True, 'activities': activities}
+        routes = recommend_routes(request, [[stadium], [onsite, indoor_alternative, nearby]], preview=True, reference=True)
+        self.assertEqual(routes[0]['nodes'][1]['place']['name'], nearby['name'])
+        activities[1].update(fixed_location=True, location=onsite['name'])
+        routes = recommend_routes(request, [[stadium], [onsite, nearby]], preview=True, reference=True)
+        self.assertEqual(routes[0]['nodes'][1]['place']['name'], onsite['name'])
+
+    @patch('backend.region_planner.context_candidates')
+    def test_reference_api_keeps_five_directions_with_a_shared_return_point(self, candidates):
+        stadium = place('경기장', 0, 0)
+        meals = [place(f'북쪽 {i}', 0, .15 + i * .12) for i in range(6)]
+        meals.extend(place(f'식당 {heading}', heading) for heading in (60, 120, 180, 240, 300))
+        candidates.side_effect = [[stadium], meals, [place('복귀 지점', 0, 0)]]
+        data = region_recommend(RegionRecommendRequest(search_center=self.start, start_location=self.start,
+                                return_location=self.start, contextual=True,
+                                activities=[activity('baseball_game', 1, visit_warning={'reason': '경기 일정 미확인'}),
+                                            activity('restaurant', 2), activity('return_to_current', 3, duration_minutes=0)]))
+        region = data['regions'][0]
+        references = region['reference_routes']
+        self.assertEqual([route['reference_rank'] for route in references], [1, 2, 3, 4, 5])
+        self.assertEqual(len({route['reference_heading'] for route in references}), 5)
+        self.assertEqual(len({route['nodes'][1]['place']['id'] for route in references}), 5)
+        self.assertTrue(all(route['nodes'][-1]['place']['name'] == '복귀 지점' for route in references))
+        self.assertEqual(region['reference_route'], references[0])
+        self.assertEqual(data['recommendations'], [])
+        review = next(row for row in region['direction_reviews'] if row['kind'] == 'reference')
+        self.assertEqual(review['base'], '경기장')
+        self.assertEqual(len(review['rows']), 36)
+        self.assertEqual(sum(row['status'] == 'selected' for row in review['rows'].values()), 5)
+        excluded = next(row for row in review['rows'].values() if row['status'] == 'rank_limit')
+        self.assertIn('식당', excluded['place'])
+        self.assertEqual(review['rows'][90]['status'], 'missing_clusters')
 
 
 class ContextAndMenuTests(unittest.TestCase):
@@ -140,21 +201,41 @@ class ContextAndMenuTests(unittest.TestCase):
         self.assertTrue(context_matches(palace, request))
         self.assertFalse(context_matches({**palace, 'name': '경희궁 숭정전'}, request))
 
+    @patch('backend.context_parser.today_in_korea', return_value=date(2026, 11, 26))
     @patch('backend.baseball_schedule.daily_games', return_value=[])
-    def test_december_fourth_baseball_game_keeps_seoul_and_shows_official_options(self, _daily_games):
+    @patch('backend.context_parser.resolve_place')
+    def test_december_fourth_corrects_model_year_and_shows_stadium_as_reference(self, locate, _daily_games, _today):
+        stadium = {'name': '고척스카이돔', 'source': 'kakao', 'latitude': 37.498, 'longitude': 126.867,
+                   'address': '서울 구로구 경인로 430'}
+        locate.return_value = stadium
         intent = model_intent({'category': 'baseball_game', 'request_term': '야구 경기', 'event_terms': ['야구 경기 관람']},
                               {'category': 'restaurant', 'request_term': '식사'},
-                              {'category': 'return_to_current', 'request_term': '지금 위치로'}, travel_date='2026-12-04')
+                              {'category': 'return_to_current', 'request_term': '지금 위치로'}, travel_date='2023-12-04')
         bucheon = {'type': 'current_location', 'name': '현재 위치', 'latitude': 37.50, 'longitude': 126.76}
-        parsed = context_parser.resolve_intent(intent, bucheon, 5)
+        with patch('backend.context_parser.analyze_text', return_value=intent):
+            parsed = parse(ParseRequest(text='12월 4일 야구 경기를 보고 식사한 뒤 지금 위치로 오고 싶어요.',
+                                        analysis_mode='context', fallback_location=bucheon))
         self.assertEqual(parsed['region_scope'], '서울')
         self.assertEqual(parsed['travel_date'], '2026-12-04')
-        self.assertIsNone(parsed['search_center'])
-        self.assertEqual(parsed['return_location'], bucheon)
+        self.assertEqual(parsed['search_center'], stadium)
+        self.assertEqual({key: parsed['return_location'][key] for key in bucheon}, bucheon)
         self.assertTrue(parsed['location_context']['needs_confirmation'])
+        self.assertTrue(parsed['reference_plan_available'])
+        self.assertFalse(parsed['live_place_plan'])
+        self.assertIn('18:30', parsed['activities'][0]['visit_warning']['reason'])
         self.assertEqual([(event['date'], event['start_time'], event['kind']) for event in parsed['event_options']],
                          [('2026-12-04', '18:30', 'baseball_event'), ('2026-12-05', '14:00', 'baseball_game')])
         self.assertEqual(parsed['event_links'][0]['url'], 'https://dreamplayers.kr/')
+
+    def test_calendar_date_handles_year_boundaries_and_explicit_relative_year(self):
+        today = date(2026, 11, 26)
+        resolve = context_parser.calendar_date_from_request
+        self.assertEqual(resolve('2023년 12월 4일 관람', today), date(2023, 12, 4))
+        self.assertEqual(resolve('11월 26일 관람', today), today)
+        self.assertEqual(resolve('11월 25일 관람', today), date(2027, 11, 25))
+        self.assertEqual(resolve('2월 29일 관람', today), date(2028, 2, 29))
+        self.assertIsNone(resolve('내년 12월 4일 관람', today))
+        self.assertIsNone(resolve('12월 4일이나 12월 5일에 관람', today))
 
     @patch('backend.baseball_schedule.daily_games', return_value=[])
     @patch('backend.context_parser.resolve_place')
@@ -229,9 +310,11 @@ class ContextAndMenuTests(unittest.TestCase):
              'mapx': restaurant['lng'], 'mapy': restaurant['lat']},
             {'title': restaurant['name'], 'tel': '02-234-5678', 'contentid': 'other_branch',
              'mapx': restaurant['lng'], 'mapy': restaurant['lat']},
-        ], [{'firstmenu': '순댓국', 'treatmenu': '순댓국 / 수육'}]]
+        ], [{'firstmenu': '순댓국', 'treatmenu': '순댓국 / 수육',
+             'opentimefood': '10:00~20:00', 'restdatefood': '매주 월요일'}]]
         found = venue_details.annotate_menus([restaurant], ['순대국'])[0]
         self.assertEqual(found['menu_status'], 'matched')
+        self.assertEqual(found['operating_hours']['hours'], '10:00~20:00')
         self.assertEqual(items.call_args.kwargs['contentId'], 'good')
 
     @patch('backend.venue_details.TOUR_API_KEY', '')

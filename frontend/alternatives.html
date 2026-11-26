@@ -4,13 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>다른 코스와 장소 · Seoul Compass AI</title>
-  <link rel="stylesheet" href="/css/style.css?v=39">
+  <link rel="stylesheet" href="/css/style.css?v=45">
 </head>
 <body data-theme="light" class="alternative-page">
   <main class="alternative-content">
     <a id="backToPlan" href="/">← 추천 화면</a>
     <h1>다른 코스와 장소</h1>
-    <p id="emptyState" hidden>같은 탭에서 일정을 분석하면 추가 코스와 장소가 여기에 표시됩니다.</p>
+    <p id="emptyState" hidden>같은 탭에서 일정을 분석하면 방향별 비교와 추가 코스가 여기에 표시됩니다.</p>
+    <section id="directionReview" hidden>
+      <h2>다른 방향이 선정되지 않은 이유</h2>
+      <p class="hint">방향마다 검색 결과와 일정 검증, 순위를 비교했습니다. 도보 확인은 공개 장소 사이의 실제 길을 조회하며, 지형과 토지 용도는 별도 자료가 필요합니다.</p>
+      <div id="directionReports"></div>
+    </section>
     <section id="otherRoutes" hidden>
       <h2>추가 코스</h2>
       <p class="hint">시간과 이동 거리는 추정값입니다.</p>
@@ -21,6 +26,6 @@
       <div id="additionalPlaces" class="alternative-list"></div>
     </section>
   </main>
-  <script src="/js/alternatives.js?v=39"></script>
+  <script src="/js/alternatives.js?v=45"></script>
 </body>
 </html>

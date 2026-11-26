@@ -66,3 +66,7 @@
 
 - `/api/parse`는 KBO 경기 일정에서 날짜와 시작 시각을 받아 카카오 장소 좌표와 연결합니다. `event_options`에는 날짜, 한국 시각, 경기장, 일정 출처(`source`, `source_url`)를 제공합니다.
 - 요청 조건을 충족하는 일정이 없거나 조회에 실패하면 같은 날짜를 유지하고 `event_links`의 공식 홈페이지를 화면에 표시합니다. `event_links`의 각 항목은 `label`, `url`을 제공합니다.
+- 관련 장소 좌표가 확인되면 `/api/parse`는 `reference_plan_available`을 반환합니다. 이 경우 `activities[].visit_warning`에 관련 사유와 출처가 들어갑니다.
+- `/api/regions/recommend`의 지역별 `reference_routes`는 서로 다른 방향의 참고 동선을 최대 5개 제공합니다. 순위는 `reference_rank`, 방위각과 방향명은 `reference_heading`, `reference_direction`입니다. 기존 `reference_route`는 목록의 첫 동선을 제공합니다. 관련 장소는 `places[].visit_warning`에 사유·출처와 함께 표시되며, 확인 가능한 연속 구간만 제공할 때 해당 동선의 `partial`이 `true`입니다. 일반 추천 순위는 기존 `recommendations`에서 제공합니다.
+- `operating_hours`는 동일 장소로 확인된 공개 운영시간·휴무 안내입니다. 운영시간과 일정 충돌이 확인되면 `/api/schedule/validate`의 `timeline[].visit_warning`과 `conflicts[].kind: visit_unavailable`로 확인할 수 있습니다.
+- `/api/regions/recommend`의 `regions[].direction_reviews`는 기준점과 10° 구역별 상태, 순위, 확인된 비교 항목을 제공합니다. 공개 장소 간 `walking_leg`가 있으면 방향 결과 페이지에서 기존 `/api/routes/network`로 도보 거리를 조회할 수 있습니다.

@@ -45,6 +45,14 @@ body.alternative-page { overflow-y:auto; font-size:14px; }
 .alternative-list .route-card { padding:14px; background:var(--panel); }
 .alternative-list ol,.alternative-list ul { margin:8px 0 0; padding-left:1.4em; }
 .alternative-list li { margin:4px 0; }
+.direction-report { margin:12px 0 24px; padding:14px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+.direction-report h3 { margin:0; font-size:16px; }
+.direction-report p { margin:6px 0 12px; }
+.direction-table { font-size:12px; }
+.direction-table th,.direction-table td { padding:8px; white-space:normal; vertical-align:top; }
+.direction-table th[scope="row"] { color:var(--ink); white-space:nowrap; }
+.direction-table .direction-selected { color:var(--accent); font-weight:700; }
+.direction-table button { margin:5px 6px 0 0; padding:4px 8px; border:1px solid var(--line); border-radius:5px; background:var(--solid); color:var(--accent); }
 #additionalCoursesLink:not([hidden]) { display:inline-block; margin:0 0 8px; }
 
 /* GPS */
@@ -160,6 +168,16 @@ details summary { cursor:pointer; color:var(--muted); font-size:10px; }
 .event-notice ul { margin:8px 0; padding-left:18px; }
 .event-notice li { margin:5px 0; }
 .event-notice a { color:var(--accent); font-weight:600; }
+.visit-warning, a.visit-warning, .map-place-tooltip.visit-warning { color:#b71931; font-weight:700; }
+.map-place-tooltip.visit-warning { max-width:min(260px, 65vw); white-space:normal; }
+body[data-theme="dark"] .visit-warning:not(.map-place-tooltip) { color:#ff8d9e; }
+.marker text.visit-warning { fill:currentColor; }
+.visit-warning-detail { display:block; margin-top:3px; }
+.visit-warning-detail a { color:inherit; text-decoration:underline; }
+.visit-warning-list { margin:8px 0; padding-left:18px; }
+.visit-warning-list li { margin-bottom:6px; }
+.reference-course { margin:8px 0; padding:8px; border-left:3px solid var(--reference-color); }
+.reference-course button[aria-pressed="true"] { font-weight:700; }
 .chart-title { font-size:8px; letter-spacing:.08em; color:var(--muted); margin-bottom:6px; }
 .donut-wrap { position:relative; width:110px; margin:auto; }
 .donut-wrap svg { width:110px; height:110px; }

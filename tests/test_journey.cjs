@@ -37,13 +37,22 @@ test('추가 코스 페이지는 6위 코스와 별도 장소 목록을 같은 �
   }, createElement:node};
   const data = {routes:[{rank:6,corridor:{heading:0,variant:'adjacent'},distance:1.2,minutes:25,
     stops:[{time:'10:00',name:'시험 카페',term:'커피'}]}],
-  places:[{label:'커피',items:[{name:'다른 카페',industry:'카페',url:'https://example.com'}]}]};
+  places:[{label:'커피',items:[{name:'다른 카페',industry:'카페',url:'https://example.com'}]}],
+  directions:[{kind:'reference', region:'시험 지역', base:'시험 구장', radius:5, activity:'식사', rows:{
+    0:{heading:0,status:'selected',rank:1}, 90:{heading:90,status:'missing_clusters'},
+    180:{heading:180,status:'rank_limit',factor:'직선 연결 거리',leg_km:2.3}}}]};
   const source = readFileSync(join(__dirname, '../frontend/js/alternatives.js'), 'utf8');
   runInNewContext(source, {document, sessionStorage:{getItem:() => JSON.stringify(data)}});
   assert.equal(elements.get('emptyState').hidden, true);
   assert.match(elements.get('additionalRoutes').children[0].children[0].textContent, /추천 6.*양옆/);
   assert.equal(elements.get('additionalPlaces').children[0].children[1].children[0].children[0].href,
     'https://example.com');
+  assert.equal(elements.get('directionReview').hidden, false);
+  const rows = elements.get('directionReports').children[0].children[2].children[1].children;
+  assert.equal(rows.length, 3);
+  assert.match(rows[0].children[1].textContent, /참고 동선 1/);
+  assert.match(rows[1].children[2].textContent, /‘식사’에 맞는 후보 군집을 찾지 못했습니다/);
+  assert.match(rows[2].children[2].textContent, /직선 연결 거리 비교에서 상위 5개보다/);
 });
 const a = {id:'a', name:'시험 산', category:'hiking', lat:37.45, lng:126.78};
 const b = {id:'b', name:'시험 수영장', category:'swimming', lat:37.46, lng:126.79};
@@ -54,6 +63,31 @@ const activities = [
   {id:3, category:'restaurant', start_time:'15:00'}
 ];
 const data = () => ({start:{latitude:a.lat, longitude:a.lng}, activities, places:[a,b,c]});
+
+test('참고 동선에서 출발부터 모든 경유지까지 연결하고 방문 경고를 빨간 장소에 표시한다', () => {
+  const start = {latitude:37.44, longitude:126.77, name:'출발 위치'};
+  const warning = {reason:'영업시간 밖 · 18:00부터 영업',source:'공식 일정',source_url:'https://example.com/'};
+  const blocked = {...b, visit_warning:warning};
+  const route = {reference:true, start_location:start, nodes:[{place:a}, {place:blocked}, {place:c}]};
+  const model = J.build({...data(), route});
+  assert.equal(model.segments.length, 3);
+  assert.equal(model.stops[1].warning, warning);
+  assert.ok(J.routeLayers({...data(), routes:[route]}, route, 'all').every(leg => leg.color === J.REFERENCE_COLOR));
+  runInNewContext(readFileSync(join(__dirname, '../frontend/js/route.js'), 'utf8'), context);
+  const view = context.window.SeoulRouteView;
+  assert.match(view.referenceCourse(route, route, 0, start), /출발 위치.*시험 산 → <strong class="visit-warning">시험 수영장<\/strong> → 시험 식당/);
+  assert.match(view.visitWarning(warning), /영업시간 밖.*https:\/\/example\.com\//);
+});
+
+test('참고 동선 다섯 개는 같은 색상 목록과 지도에서 서로 구분된다', () => {
+  const courses = [0, 60, 120, 180, 240].map((heading, i) => ({reference:true, reference_rank:i + 1,
+    reference_heading:heading, reference_direction:'방향', nodes:[{place:a}, {place:{...b, lng:b.lng + i * .003}}, {place:c}]}));
+  const layers = J.routeLayers({...data(), routes:courses}, courses[0], 'all');
+  assert.equal(new Set(layers.map(leg => leg.color)).size, 5);
+  const view = context.window.SeoulRouteView;
+  assert.match(view.referenceCourse(courses[4], courses[4], 0, null, 4), /data-route="4" aria-pressed="true">참고 5 · 방향 240°/);
+  assert.match(view.referenceCourse(courses[4], courses[4], 0, null, 4), /--reference-color:#397044/);
+});
 
 test('50m 반경 군집은 중복·잘못된 좌표를 제외하고 실제 장소를 대표로 쓴다', () => {
   const nearby = {...b, id:'near', lat:a.lat + .0003, lng:a.lng};

@@ -4,7 +4,7 @@
 
 ## 지금 필요한 설정
 
-2026-11-26 로컬 환경 기준으로 OpenAI 문맥 분석, 카카오 지도·장소 검색, TourAPI 키가 설정되어 있다. **상권 업종 정보를 실조회하려면 `SBDC_API_KEY`가 필요하다.** 철도 실선을 조회할 때는 `ODSAY_API_KEY`가 필요하다.
+2026-11-26 로컬 환경에서 OpenAI·카카오·상권정보·TourAPI·TheSportsDB의 실제 API 응답을 확인했다. ODsay는 발급 문의 중이다. 새 환경에서 상권 업종 정보를 조회하려면 `SBDC_API_KEY`를 설정한다.
 
 1. 공공데이터포털에서 소상공인시장진흥공단 상가(상권)정보 API를 무료로 활용신청한다. [활용신청 페이지](https://www.data.go.kr/data/15012005/openapi.do)
 2. 승인 후 발급된 일반 인증키를 프로젝트 루트의 `.env`에 `SBDC_API_KEY=발급받은_인증키`로 저장한다. 공개 철도 기능이 필요하면 ODsay 키도 `ODSAY_API_KEY`에 설정한다. [환경변수 항목](../.env.example) · [ODsay 개발자 문서](https://lab.odsay.com/guide/releaseReference?platform=web)
@@ -20,6 +20,8 @@
 
 앱은 모델 출력에서 날짜·시간·조건을 읽고, 장소명·좌표·업종은 장소 및 공공 데이터 응답에서 검증한다. 기존에 사용 중인 외부 유료 API의 승인 기준은 프로젝트 규칙을 따른다. [Responses API 명세](https://developers.openai.com/api/reference/resources/responses/methods/create) · [프로젝트 승인 규칙](../AGENTS.md#194-변경-승인-규칙)
 
+승인된 실호출 1건에서 서울역 반경 1km, 오전 10시 카페, 정오 식사와 업종 후보를 확인했다. 이 응답을 연결한 추천 요청은 공개 상권 데이터를 받았고 코스는 0개였다. 같은 장소와 활동 시각에 체류 시간을 따로 지정한 요청은 상위 5개와 추가 21개 코스를 반환했다. [검증 기록](progress.md#2026-11-26-발급된-외부-api-키-실조회-점검)
+
 ## 2. 지도와 실제 장소 검색
 
 | 서비스 | 설정 | 앱에서 사용하는 정보 |
@@ -33,17 +35,25 @@
 
 | 서비스 | 단계 | 데이터와 쓰임새 |
 |---|---|---|
-| 소상공인시장진흥공단 상가(상권)정보 API | 연동 구현, 응답 모의 검증, 로컬 키 미설정 | `smallUpjongList`에서 업종명을 소분류 코드에 연결하고 `storeListInRectangle`에서 상가업소번호, 업종, 주소, 좌표를 조회한다. 앱에서 실제 반경과 지역을 다시 확인한다. |
+| 소상공인시장진흥공단 상가(상권)정보 API | 로컬 키 설정 및 실조회 검증 | `smallUpjongList`에서 업종명을 소분류 코드에 연결하고 `storeListInRectangle`에서 상가업소번호, 업종, 주소, 좌표를 조회한다. 앱에서 실제 반경과 지역을 다시 확인한다. |
 | 행정안전부 전국일반음식점표준데이터 | 추가 연동 후보 | 일반음식점 인허가와 공개 영업 상태를 확인할 수 있는 데이터다. 개별 점포의 당일 영업시간은 별도 출처가 필요하다. |
-| 국세청 사업자등록정보 진위확인·상태조회 | 추가 연동 후보 | 이미 알고 있는 사업자등록번호로 휴업·폐업 등 상태를 조회하는 용도다. |
+| 국세청 사업자등록정보 진위확인·상태조회 | 키 설정 및 직접 요청의 인증 검증, 앱 연동 예정 | 이미 알고 있는 사업자등록번호로 휴업·폐업 등 상태를 조회하는 용도다. |
 
 상가업소번호는 상권정보 서비스의 식별자다. 앱에서 동일한 지점으로 연결할 때는 상호와 주소 또는 50m 이내 좌표를 대조한다. 양쪽에 공개 전화번호가 있으면 번호도 비교한다. [상권정보 API](https://www.data.go.kr/data/15012005/openapi.do) · [일반음식점 인허가 데이터](https://www.data.go.kr/data/15096283/standard.do) · [국세청 상태조회 API](https://www.data.go.kr/data/15081808/openapi.do)
+
+국세청 상태조회는 아직 연동되지 않았으며 현재 앱에 활성화할 환경변수는 없다. 향후 연동할 때는 `NTS_BUSINESS_API_KEY`를 변수명으로 사용한다. 공공데이터포털에서 해당 서비스의 활용 승인을 받은 계정의 일반 인증키를 프로젝트 루트 `.env`에 저장하는 형식은 아래와 같다. [국세청 API 활용신청](https://www.data.go.kr/data/15081808/openapi.do)
+
+```env
+NTS_BUSINESS_API_KEY=발급받은_일반_인증키
+```
+
+로컬 `.env`에 저장된 인증키로 합성 시험 번호를 조회했고 `HTTP 200`과 `status_code: OK` 응답을 확인했다. 이 인증 시험은 실제 사업체의 휴업·폐업 여부를 확인하는 검증과 구분한다.
 
 ## 4. 메뉴와 관람 일정
 
 | 서비스 | 설정 | 앱에서 사용하는 정보 |
 |---|---|---|
-| 한국관광공사 국문 관광정보 서비스_GW `KorService2` | `TOUR_API_KEY` | `searchKeyword2`로 장소를 찾고 동일한 업소로 확인되면 `detailIntro2`에서 공개 메뉴를 조회한다. |
+| 한국관광공사 국문 관광정보 서비스_GW `KorService2` | `TOUR_API_KEY` | `searchKeyword2`로 장소를 찾고 동일한 업소로 확인되면 `detailIntro2`의 공개 메뉴, 영업시간(`opentimefood`), 휴무(`restdatefood`)를 사용한다. |
 | TheSportsDB KBO 일정 | 공개 무료 기본값 사용. 계정별 키는 `SPORTSDB_API_KEY` | 요청 날짜와 앞뒤 하루의 경기, 구장, 시작 시각을 조회한다. 일정을 확인하지 못하면 KBO나 주최 측 홈페이지를 안내한다. |
 
 TourAPI 키는 서비스 활용신청 후 일반 인증키를 사용한다. 공개 메뉴가 없을 때는 장소 상세 링크와 제공된 전화번호로 확인할 수 있다. 취소·연기 또는 시작 시각이 확인되지 않은 경기에는 확정 관람 경로를 만들지 않는다. [한국관광공사 TourAPI](https://www.data.go.kr/data/15101578/openapi.do) · [TheSportsDB 일정 명세](https://api.thesportsdb.com/documentation) · [KBO 공식 경기 일정](https://www.koreabaseball.com/Schedule/Schedule.aspx)

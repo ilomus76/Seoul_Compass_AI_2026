@@ -17,8 +17,17 @@
     const search = `${mode}:${Number(data.start?.latitude)}:${Number(data.start?.longitude)}:${radius}`;
     const svg = container.querySelector(':scope > svg[data-search]');
     const sameMode = svg?.dataset.search.startsWith(mode + ':');
-    const viewBox = sameMode && (data.preserveZoom || svg.dataset.search === search)
+    let viewBox = sameMode && (data.preserveZoom || svg.dataset.search === search)
       ? svg.getAttribute('viewBox') : '0 0 600 600';
+    if (data.focusPoints?.length) {
+      const center = {lat:Number(data.start.latitude), lng:Number(data.start.longitude)};
+      const projected = data.focusPoints.map(p => geoProject(p.lat, p.lng, center, radius, mode === 'geo' ? 275 : 245));
+      const xs = projected.map(p => p.x), ys = projected.map(p => p.y);
+      const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys);
+      const size = Math.min(600, Math.max(150, (right - left) + 75, (bottom - top) + 75));
+      const origin = (min, max) => Math.max(0, Math.min(600 - size, (min + max - size) / 2));
+      viewBox = `${origin(left, right)} ${origin(top, bottom)} ${size} ${size}`;
+    }
     return `viewBox="${esc(viewBox)}" data-search="${search}"`;
   }
 
@@ -57,11 +66,11 @@
     const markers = places.map((p) => {
       const r = Math.min(maxR, (p.distance_km / radius) * maxR);
       const [x, y] = point(cx, cy, r, p.bearing || 0);
-      const color = categoryColors[p.category] || '#a86a8f';
+      const color = p.visit_warning ? global.SeoulJourney.REFERENCE_COLOR : categoryColors[p.category] || '#a86a8f';
       return `<g class="marker" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">
         <circle r="9" fill="${color}" opacity=".16"/><circle r="4.5" fill="${color}" stroke="#f5f2eb" stroke-width="1.2"/>
-        <text x="9" y="-7" fill="#eef3ff" font-size="9">${esc(p.name)}</text>
-        <title>${esc(p.name)} · ${esc(p.direction || '')} · ${p.distance_km}km · ${p.score || 0}점</title></g>`;
+        <text x="9" y="-7"${p.visit_warning ? ' class="visit-warning"' : ' fill="#eef3ff"'} font-size="9">${esc(p.name)}</text>
+        <title>${esc(p.name)} · ${p.visit_warning ? esc(p.visit_warning.reason) : `${esc(p.direction || '')} · ${p.distance_km}km · ${p.score || 0}점`}</title></g>`;
     }).join('');
 
     const nodes = route && route.nodes ? route.nodes : [];
@@ -168,10 +177,10 @@
 
     const markers = places.map((p) => {
       const q = geoProject(p.lat, p.lng, center, radius, extent);
-      const color = (C.COLORS || {})[p.category] || '#a86a8f';
+      const color = p.visit_warning ? global.SeoulJourney.REFERENCE_COLOR : (C.COLORS || {})[p.category] || '#a86a8f';
       return `<g class="marker" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})">
         <circle r="8" fill="${color}" opacity=".16"/><circle r="4" fill="${color}" stroke="#f5f2eb"/>
-        <text x="8" y="-7">${esc(p.name)}</text><title>${esc(p.name)} · ${p.distance_km}km · ${p.score || 0}점</title></g>`;
+        <text x="8" y="-7"${p.visit_warning ? ' class="visit-warning"' : ''}>${esc(p.name)}</text><title>${esc(p.name)} · ${p.visit_warning ? esc(p.visit_warning.reason) : `${p.distance_km}km · ${p.score || 0}점`}</title></g>`;
     }).join('');
 
     const allRoutes = data.route_layers?.length ? [] : (route ? [route] : []);
