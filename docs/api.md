@@ -1,5 +1,7 @@
 # API 명세
 
+이 문서는 서울 컴파스 AI 서버가 제공하는 내부 API를 설명합니다. 외부 공급자의 종류별 기능과 설정은 [외부 API와 데이터 출처](api-sources.md)에 있습니다.
+
 서버: `http://127.0.0.1:9200` · Swagger UI: `/docs`
 
 | Method | Endpoint | 기능 |

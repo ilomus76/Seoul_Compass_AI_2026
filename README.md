@@ -89,14 +89,7 @@ Seoul_Compass_AI_2026/
 
 ### 필요한 API와 추가 데이터
 
-| 역할 | 서비스 | 설정과 적용 범위 |
-|---|---|---|
-| 문맥 분석 | OpenAI Responses API | `LLM_API_KEY`, `CONTEXT_LLM_ENABLED=true`. 활동·시간·검색어·업종명 후보를 해석합니다. |
-| 장소 검색과 지도 | [카카오 Local](https://developers.kakao.com/docs/ko/local/dev-guide) | `KAKAO_REST_API_KEY`, 지도 SDK는 `KAKAO_JAVASCRIPT_KEY`. 실제 주소·좌표·공개 번호·카테고리를 조회합니다. |
-| 공공 상가 업종 | [소상공인시장진흥공단 상가(상권)정보 API](https://www.data.go.kr/data/15012005/openapi.do) | 무료 활용신청 후 프로젝트 `.env`에 `SBDC_API_KEY`로 등록하고 재시작합니다. 상가업소번호·상권업종·표준산업분류·주소·좌표를 사용합니다. |
-| 공개 메뉴와 관람 일정 | [TourAPI](https://www.data.go.kr/data/15101578/openapi.do), [TheSportsDB](https://api.thesportsdb.com/documentation) | 관광공사 메뉴는 `TOUR_API_KEY`, KBO 일정은 공개 무료 API를 사용합니다. |
-| 추가 영업 상태 데이터 | [일반음식점 인허가 공개 데이터](https://www.data.go.kr/data/15096283/standard.do), [국세청 사업자등록 상태조회](https://www.data.go.kr/data/15081808/openapi.do) | 후속 연동 대상입니다. 국세청 서비스는 확인할 사업자등록번호가 필요하며, 매장 탐색에는 위 상권정보 API를 사용합니다. |
-| 실제 교통 경로 | [OSRM](https://routing.openstreetmap.de/about.html), [ODsay](https://lab.odsay.com/) | 도로 및 철도 선형 조회에 사용합니다. 철도에는 `ODSAY_API_KEY`가 필요합니다. |
+분석·장소 검색·상가 업종·메뉴·경기 일정·실제 경로의 공급자, 키 설정법과 검증 상태는 [종류별 외부 API와 데이터 출처](docs/api-sources.md)에 정리했습니다.
 
 ## API
 
