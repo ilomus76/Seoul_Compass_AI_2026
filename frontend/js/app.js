@@ -12,15 +12,25 @@
     watchId: null, scrubTimer: null, voice: null, listening: false,
     density: null, transport: null, alarms: [], chat: [], weather: null,
     sim: { playing:false, progress:0, speed:1, mode:'walking', timer:null, logged:-1 },
-    kakaoKey: null, kakaoFailed: false
+    kakaoKey: null, kakaoFailed: false,
+    searchCenter: null, routeStart: null, locationFromQuestion: false, locationError: null,
+    regions: [], selectedRegion: null, directionalResult: null, planEdited: false, originLocation: null, resumeAfterLocation: false,
+    journeyFilter:'all', journeyVisible:true, previewRoute:null, analyzedText:''
   };
   let lastPlaces = [], lastScores = [];
   let reportCache = {};
+  let scheduleRevision = 0;
+  const networkRoutes = new WeakMap();
+  const networkPending = new WeakSet();
+  let displayedJourney = null;
 
   async function post(path, body) {
     const res = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`${path} 오류: ${res.status}`);
+    if (!res.ok) {
+      const result = await res.json().catch(() => null);
+      throw new Error(typeof result?.detail === 'string' ? result.detail : `${path} 오류: ${res.status}`);
+    }
     return res.json();
   }
   async function request(path) {
@@ -39,15 +49,36 @@
   }
 
   /* ---------- 지도 ---------- */
-  function renderCurrentMap() {
+  function renderCurrentMap({preserveZoom = false} = {}) {
     // 입력값이 없으면 분석용 기본값만 사용하고 화면에는 비워둔다.
     const lat = Number($('lat').value) || 37.5665;
     const lng = Number($('lng').value) || 126.9780;
     const payload = {
       start: { latitude: lat, longitude: lng },
+      route_start: state.routeStart,
       radius_km: Number($('radius').value) || 5,
-      places: lastPlaces, scores: lastScores, route: state.selectedRoute, routes: state.routes
+      places: lastPlaces, scores: lastScores, route: state.selectedRoute || state.previewRoute,
+      routes: state.routes,
+      activities: state.parsed?.activities || [], candidate_groups:state.selectedRegion?.candidate_groups,
+      preserveZoom, networkRoutes
     };
+    payload.routeColor = SeoulJourney.ROUTE_COLORS[state.routes.indexOf(payload.route)];
+    const journey = SeoulJourney.build(payload);
+    displayedJourney = journey;
+    const filter = $('journeyFilter');
+    if (!journey.stops.some(s => String(s.index) === state.journeyFilter)) state.journeyFilter = 'all';
+    filter.innerHTML = '<option value="all">전체 동선</option>' + journey.stops.map(s =>
+      `<option value="${s.index}">${esc(s.time)} ${esc(s.name)}${s.place ? '' : ' · 장소 없음'}</option>`).join('');
+    filter.value = state.journeyFilter;
+    $('journeyPanel').hidden = !journey.stops.length;
+    $('journeyNote').textContent = journey.preview
+      ? '후보 동선 · 요청 시각 기준 · 출발 구간 미포함'
+      : '선택 일정의 동선 · 시각은 이동 추정 반영';
+    $('journeyGuide').textContent = '반경 50m 후보 군집 · 실선: 조회된 길 · 점선: 직선 추정';
+    payload.journey = state.journeyVisible ? journey : null;
+    payload.journey_filter = state.journeyFilter;
+    payload.route_layers = SeoulJourney.routeLayers(payload, payload.route, state.journeyVisible ? state.journeyFilter : 'all');
+    renderNetworkStatus(payload.route, journey, payload.route_layers);
     if (state.kakaoKey && state.mapMode === 'geo' && !state.kakaoFailed) {
       SeoulMapHelper.useKakaoMap($('compass'), state.kakaoKey, payload.start, payload, (msg) => {
         state.kakaoFailed = true;
@@ -57,15 +88,67 @@
         if (badge) badge.textContent = '카카오 로드 실패 → SVG';
         toast(msg);
       });
-    } else if (state.mapMode === 'geo') SeoulCompassMap.renderGeo($('compass'), payload);
-    else SeoulCompassMap.render($('compass'), payload);
+    } else {
+      SeoulMapHelper.clearKakaoMap();
+      if (state.mapMode === 'geo') SeoulCompassMap.renderGeo($('compass'), payload);
+      else SeoulCompassMap.render($('compass'), payload);
+    }
     applySimMarker();
     $('mapModeGeo').classList.toggle('active', state.mapMode === 'geo');
     $('mapModePolar').classList.toggle('active', state.mapMode === 'polar');
-    const name = $('locationName').value;
-    $('mapCaption').textContent = name
-      ? `${name} 기준 · 360도 스캔${state.gps.used ? ' · GPS' : ''}`
-      : '출발지 미설정 · GPS 또는 지도 선택';
+    const name = state.searchCenter ? state.searchCenter.name : $('locationName').value;
+    const departure = state.routeStart && state.routeStart.name;
+    $('mapCaption').textContent = state.locationError || (name
+      ? `${name} 기준 · ${payload.radius_km}km${departure && departure !== name ? ` · 출발 ${departure}` : ''}`
+      : '검색 기준점 미설정 · GPS 또는 지도 선택');
+  }
+
+  function renderNetworkStatus(route, journey, layers) {
+    $('networkLookup').disabled = !route || !journey.segments.length || networkPending.has(route);
+    $('networkCredits').hidden = !layers.some(s => s.network?.source === 'osm');
+    const applied = journey.segments.filter(s => s.network);
+    const result = route && networkRoutes.get(route);
+    const status = $('networkStatus');
+    if (route && networkPending.has(route)) {
+      status.textContent = '실제 경로를 조회하고 있습니다.';
+    } else if (result?.status === 'missing_key') {
+      status.textContent = '철도·지하철 노선을 조회하려면 서버에 ODsay 키가 필요합니다.';
+    } else if (applied.length) {
+      const mode = {walking:'도보', cycling:'자전거', driving:'자동차', subway:'지하철', train:'기차'}[result.mode];
+      const fullDistance = applied.length === journey.segments.length && applied.every(s => s.network.distance_km != null);
+      const totals = fullDistance
+        ? ` · ${applied.reduce((n, s) => n + s.network.distance_km, 0).toFixed(2)}km · 약 ${applied.reduce((n, s) => n + s.network.minutes, 0)}분` : '';
+      status.textContent = `${mode} 실선 ${applied.length}/${journey.segments.length}구간${totals}`
+        + (applied.some(s => s.network.source === 'odsay') ? ' · ODsay 노선 · 역 접근·환승 도보 제외' : '');
+    } else if (result?.status === 'unavailable') {
+      status.textContent = '조회된 경로가 없어 직선 추정으로 표시합니다.';
+    } else {
+      status.textContent = '조회 시 선택 구간의 좌표를 경로 서비스에 보냅니다.';
+    }
+  }
+
+  async function lookupNetwork() {
+    const route = state.selectedRoute || state.previewRoute;
+    const journey = displayedJourney;
+    if (!route || !journey?.segments.length || networkPending.has(route)) return;
+    const mode = $('networkMode').value;
+    const keys = new Map(journey.segments.map(segment => [segment.index, SeoulJourney.segmentKey(segment)]));
+    const legs = journey.segments.map(s => ({
+      index:s.index, start:{lat:s.from.lat,lng:s.from.lng}, end:{lat:s.to.lat,lng:s.to.lng}
+    }));
+    networkPending.add(route);
+    $('networkLookup').disabled = true;
+    $('networkStatus').textContent = '실제 경로를 조회하고 있습니다.';
+    try {
+      const result = await post('/api/routes/network', {mode, legs});
+      networkRoutes.set(route, {mode, status:result.status, legs:new Map(result.legs.map(leg =>
+        [leg.index, {...leg, mode, key:keys.get(leg.index)}]))});
+    } catch {
+      networkRoutes.set(route, {mode, status:'unavailable', legs:new Map()});
+    } finally {
+      networkPending.delete(route);
+      if (state.routes.includes(route)) renderCurrentMap();
+    }
   }
 
   /* ---------- 일정표 ---------- */
@@ -76,10 +159,26 @@
           if (!state.selectedRoute || !state.parsed) return;
           const node = state.selectedRoute.nodes[index];
           SeoulScheduleView.renderDetail($('scheduleDetail'), {
-            activity: state.parsed.activities[index], place: node.place, node, candidates: lastPlaces
+            activity: state.parsed.activities[index], place: node.place, node,
+            candidates: state.selectedRegion ? state.selectedRegion.candidate_groups[index].places : lastPlaces
           }, { onPlaceChange: (place) => {
-            node.place = place; node.distance_km = place.distance_km;
-            node.travel_minutes = place.distance_km ? Math.max(1, Math.round(place.distance_km / 5 * 60)) : 0;
+            node.place = place;
+            delete node.cluster;
+            networkRoutes.delete(state.selectedRoute);
+            if (state.routeStart) {
+              // 시설을 바꾸면 중심까지의 거리가 아닌 연속 방문 지점 사이의 거리를 다시 구한다.
+              let previous = {lat:state.routeStart.latitude, lng:state.routeStart.longitude};
+              const mode = inputs().modes[0] || 'walking';
+              state.selectedRoute.nodes.forEach(segment => {
+                const p = SeoulJourney.nodePoint(segment);
+                const distance = SeoulJourney.distance(previous, p) / 1000;
+                segment.distance_km = Math.round(distance * 1000) / 1000;
+                segment.travel_minutes = distance < .001 ? 0 : Math.max(1, Math.round(distance / ({walking:5,bus:20,subway:30}[mode] || 5) * 60)) + (mode === 'walking' ? 0 : 5);
+                previous = p;
+              });
+              state.selectedRoute.total_distance_km = Number(state.selectedRoute.nodes.reduce((sum, n) => sum + n.distance_km, 0).toFixed(2));
+              state.selectedRoute.total_travel_minutes = state.selectedRoute.nodes.reduce((sum, n) => sum + n.travel_minutes, 0);
+            }
             revalidate(); renderCurrentMap(); toast(`장소를 ${place.name}(으)로 변경했습니다.`);
           }});
         },
@@ -87,7 +186,15 @@
           if (!state.parsed || !state.parsed.activities[index]) return;
           state.parsed.activities[index].start_time = value;
           state.parsed.activities[index].fixed_time = true;
+          state.planEdited = true;
           revalidate(); toast('시간을 수정하고 일정을 다시 검증했습니다.');
+        },
+        onDurationChange: (index, value) => {
+          if (!state.parsed || !state.parsed.activities[index]) return;
+          state.parsed.activities[index].duration_minutes = value;
+          state.parsed.activities[index].duration_estimated = false;
+          state.planEdited = true;
+          revalidate(); toast('체류시간을 수정하고 일정을 다시 검증했습니다.');
         }
       });
     renderScrubber();
@@ -95,11 +202,25 @@
 
   async function revalidate() {
     if (!state.selectedRoute) return;
+    const route = state.selectedRoute;
+    const revision = ++scheduleRevision;
     try {
       const result = await post('/api/schedule/validate', {
-        activities: state.parsed.activities, route: state.selectedRoute });
+        activities: state.parsed.activities, route });
+      if (route !== state.selectedRoute || revision !== scheduleRevision) return;
+      if (state.selectedRegion) {
+        result.timing_feasible_estimate = result.feasible; result.feasible = null;
+        result.verified_feasible = false;
+        result.note = '사용자 수정과 직선거리 이동 추정 기준입니다. 실제 방문 가능성은 확인이 필요합니다.';
+      }
       state.selectedRoute.schedule = result;
+      reportCache = {};
+      if (state.selectedRegion) {
+        state.selectedRegion.status = result.conflicts.length ? 'time_conflict' : 'needs_confirmation';
+      }
+      renderRecommendations();
       renderSchedule();
+      renderCurrentMap();
       SeoulRouteView.renderReport($('reportBody'), reportFor(state.selectedRoute));
       renderCharts(lastPlaces, lastScores);
     } catch (err) { toast(err.message || '일정 검증에 실패했습니다.'); }
@@ -140,6 +261,7 @@
       ? `${current.category} · ${current.place || ''} · ${current.estimated_start}~${current.estimated_end}`
       : '이동 또는 대기 구간';
     document.querySelectorAll('#compass .route-node').forEach((n, i) => n.classList.toggle('active', i === active));
+    SeoulJourney.highlight($('compass'), minute);
   }
 
   $('scrubSlider').addEventListener('input', () => updateScrub(Number($('scrubSlider').value)));
@@ -169,8 +291,8 @@
         ${places.map(p => {
           const crowd = p.crowd_by_hour ? Math.round(Object.values(p.crowd_by_hour).reduce((a,b)=>a+b,0) / Object.values(p.crowd_by_hour).length) : '-';
           return `<tr><td><b>${esc(p.name)}</b><br><small>${esc(p.address || '')}</small></td><td>${esc(p.category)}</td>
-            <td>${p.distance_km}km</td><td>★ ${p.rating}</td><td>${esc(p.hours || '-')}</td>
-            <td>${p.fee_krw || 0}원</td><td>${crowd}%</td></tr>`;
+            <td>${p.distance_km}km (직선)</td><td>${p.rating == null ? '미확인' : '★ ' + p.rating}</td><td>${esc(p.hours || '확인 필요')}</td>
+            <td>${p.fee_krw == null ? '확인 필요' : p.fee_krw + '원'}</td><td>${crowd === '-' ? '미확인' : crowd + '%'}</td></tr>`;
         }).join('')}</tbody></table>`
       : '<p class="hint">검색 결과가 없습니다.</p>';
   }
@@ -179,7 +301,8 @@
     const conflicts = (state.selectedRoute && state.selectedRoute.schedule
       && state.selectedRoute.schedule.conflicts
       && state.selectedRoute.schedule.conflicts.length) || 0;
-    SeoulCharts.kpis($('kpiGrid'), { places, routes: state.routes, conflicts, scores });
+    SeoulCharts.kpis($('kpiGrid'), { places, routes: state.routes, conflicts, scores,
+      regionMode: !!state.selectedRegion, draftCount: state.routes.length });
     renderPlaceList(places);
     SeoulCharts.donut($('categoryDonut'), places);
     SeoulCharts.orbit($('directionOrbit'), scores);
@@ -187,15 +310,20 @@
     SeoulCharts.bars($('scoreBars'), scores);
     $('directionScores').innerHTML = Object.entries(scores).sort((a,b)=>b[1]-a[1])
       .map(([n,v]) => `<span>${esc(n)} ${v}점</span>`).join('');
-    SeoulCharts.routeRadar($('routeRadar'), state.routes);
+    SeoulCharts.routeRadar($('routeRadar'), state.routes.filter(r => r.score != null));
     SeoulCharts.flowRibbon($('flowRibbon'), state.selectedRoute);
     SeoulCharts.routeProfile($('routeProfile'), state.selectedRoute);
     SeoulCharts.horizon($('crowdHorizon'), state.selectedRoute);
     SeoulCharts.heat($('crowdHeat'), state.selectedRoute);
     SeoulCharts.timelineRibbon($('timelineRibbon'), state.selectedRoute && state.selectedRoute.schedule);
-    const routeScores = {}; state.routes.forEach((r,i)=>{ routeScores[`${i+1}위`] = r.score; });
+    const routeScores = {}; state.routes.forEach((r,i)=>{ if (r.score != null) routeScores[`${i+1}위`] = r.score; });
     SeoulCharts.bars($('routeQuality'), routeScores);
     SeoulCharts.gauge($('scoreGauge'), state.selectedRoute && state.selectedRoute.score);
+    if (state.selectedRegion) {
+      $('crowdHorizon').textContent = '시간별 혼잡도 정보 미확인';
+      $('crowdHeat').innerHTML = '';
+      $('scoreGauge').textContent = '실제 방문 가능성 확인 필요';
+    }
   }
 
   function reportFor(route) {
@@ -208,7 +336,8 @@
       total_activity_minutes: 0, estimated_transport_cost_krw: null,
       estimated_facility_cost_krw: route.estimated_cost_krw, reasons: [],
       conflicts: (route.schedule || {}).conflicts || [], data_confidence: route.data_confidence,
-      cautions: ['직선거리 기반 추정입니다. 실제 경로는 확인이 필요합니다.'], alternatives: []
+      verification_status: route.verification_status,
+      cautions: route.cautions || ['직선거리 기반 추정입니다. 실제 경로는 확인이 필요합니다.'], alternatives: []
     };
     return reportCache[key];
   }
@@ -221,10 +350,10 @@
     const item = (label, value) => `<div><b>${esc(label)}</b><span>${esc(value || '-')}</span></div>`;
     const planRows = (p.activities || []).map((a, i) => {
       const start = a.start_time || a.earliest_start || a.preferred_time || '-';
-      let end = '-';
-      if (start !== '-') {
+      let end = a.end_time || '-';
+      if (start !== '-' && !a.end_time && a.duration_minutes != null) {
         const [h, m] = start.split(':').map(Number);
-        const total = h * 60 + m + (a.duration_minutes || 60);
+        const total = h * 60 + m + a.duration_minutes;
         end = `${String(Math.floor(total / 60) % 24).padStart(2,'0')}:${String(total % 60).padStart(2,'0')}`;
       }
       return `<tr><td>${i + 1}</td><td>${esc(a.keyword || a.category)}</td>
@@ -234,10 +363,18 @@
         <td>${a.fixed_time ? '고정' : '추정'}</td></tr>`;
     }).join('');
     box.innerHTML = `<div class="detail-grid">
+      ${item('분석 방식', p.analysis_method === 'context' ? '문맥 분석' : '기존 규칙 분석')}
+      ${item('방문 지역', p.region_scope)}
       ${item('날짜', p.travel_date || '미지정')}
       ${item('예산', p.budget_krw ? `${p.budget_krw}원` : '미지정')}
       ${item('목적', (p.purpose || []).join(' · '))}
       ${item('특이사항', (p.special_notes || []).join(' · '))}
+      ${item('검색 기준점', p.search_center && p.search_center.name)}
+      ${item('중심 선택 이유', p.location_context && p.location_context.reason)}
+      ${item('좌표 출처', p.search_center && p.search_center.source)}
+      ${item('경로 출발지', p.start_location && p.start_location.name)}
+      ${item('검색 반경', `${p.radius_km}km`)}
+      ${item('출발 시각', p.departure_time)}
     </div>
     <div class="chunk-title">플랜 구조 데이터 <span>${(p.activities || []).length}개 항목</span></div>
     <div class="table-wrap"><table class="plan-table"><thead><tr><th>#</th><th>활동</th><th>날짜</th><th>시간</th><th>장소</th><th>목적</th><th>특이사항</th><th>구분</th></tr></thead>
@@ -359,6 +496,7 @@
     try {
       const data = await post('/api/routes/options', {
         latitude: cfg.lat, longitude: cfg.lng, radius_km: cfg.radius,
+        start_location: state.routeStart,
         transport_modes: cfg.modes, activities });
       state.transport = data;
       const box = $('transportList');
@@ -506,9 +644,9 @@
     const start = { latitude: cfg.lat, longitude: cfg.lng };
     const seg = Math.min(nodes.length - 1, Math.floor(state.sim.progress * (nodes.length - 1)));
     const frac = state.sim.progress * (nodes.length - 1) - seg;
-    const a = SeoulCompassMap.projectForSim(nodes[seg].place, start, cfg.radius);
+    const a = SeoulCompassMap.projectForSim(SeoulJourney.nodePoint(nodes[seg]), start, cfg.radius);
     const b = nodes[seg + 1]
-      ? SeoulCompassMap.projectForSim(nodes[seg + 1].place, start, cfg.radius) : a;
+      ? SeoulCompassMap.projectForSim(SeoulJourney.nodePoint(nodes[seg + 1]), start, cfg.radius) : a;
     return { seg, frac, x: a.x + (b.x - a.x) * frac, y: a.y + (b.y - a.y) * frac };
   }
 
@@ -592,6 +730,124 @@
   $('simMode').addEventListener('change', () => { state.sim.mode = $('simMode').value; updateSimUI(); });
 
   /* ---------- 분석 ---------- */
+  const activityNames = { hiking:'등산', swimming:'수영', restaurant:'식사', shower:'샤워', bowling:'볼링',
+    history_museum:'역사 박물관', palace:'고궁', market_food:'시장 먹거리', baseball_game:'야구 경기 관람',
+    baseball_event:'야구 행사 관람', return_to_current:'현재 위치 복귀' };
+
+  function renderRecommendations() {
+    const panel = $('recommendationPanel');
+    panel.hidden = (!state.directionalResult && !!state.selectedRegion) || !state.routes.length;
+    if (!panel.hidden) {
+      const scan = state.directionalResult;
+      $('recommendationCoverage').textContent = `활동 후보 충족 100% · 반경 ${state.parsed.radius_km}km`
+        + (scan ? ` · ${scan.scanned_headings}방향 비교 · 중복 제외 ${scan.direction_candidate_count}개 코스` : '');
+      $('recommendationList').innerHTML = SeoulRouteView.recommendationList(
+        state.routes, state.selectedRoute || state.previewRoute, -1, state.routeStart, state.analyzedText);
+    }
+    if (state.selectedRegion) renderRegions();
+    SeoulRouteView.render($('routeList'), state.routes, selectGlobalRecommendation);
+  }
+
+  function selectGlobalRecommendation(route) {
+    const regionIndex = route?.region_id && state.regions.findIndex(region => region.id === route.region_id);
+    if (Number.isInteger(regionIndex) && regionIndex >= 0 && state.regions[regionIndex] !== state.selectedRegion) {
+      selectRegion(regionIndex, state.regions[regionIndex].routes.indexOf(route), {preserveZoom:true});
+    } else selectRecommendation(route);
+  }
+
+  function selectRecommendation(route) {
+    if (!route) return;
+    state.previewRoute = route.preview ? route : null;
+    state.selectedRoute = route.preview ? null : route;
+    state.journeyFilter = 'all';
+    $('scheduleDetail').hidden = true;
+    renderCurrentMap({preserveZoom:true}); renderSchedule(); renderCharts(lastPlaces, lastScores);
+    if (route.preview) $('scrubLabel').textContent = '후보 동선 · 출발 위치 적용 후 일정 계산';
+    renderRecommendations();
+    SeoulRouteView.renderReport($('reportBody'), reportFor(state.selectedRoute));
+    simReset(); renderAlarms();
+    if (state.planEdited && state.selectedRoute) revalidate();
+  }
+
+  function renderRegions() {
+    const panel = $('regionPanel'); panel.hidden = false;
+    $('regionList').innerHTML = state.regions.map((region, i) => {
+      const status = { missing_places:'필수 장소 부족', no_corridor:'방향·시간 조건에 맞는 경로 없음',
+        time_conflict:'시간 충돌 있음', needs_origin:'현재 위치 적용 필요', needs_confirmation:'방문 조건 확인 필요' }[region.status];
+      const routes = region.routes || (region.draft_route ? [region.draft_route] : []);
+      const selected = state.selectedRegion === region ? state.selectedRoute || state.previewRoute : null;
+      const timeline = (selected || region.draft_route)?.schedule?.timeline || [];
+      const markets = (selected || region.draft_route)?.nodes.map(node => node.place)
+        .filter(place => place.food_options?.length) || [];
+      return `<article class="route-card" style="--card-accent:${state.selectedRegion === region ? '#2f8f83' : '#b8914e'}">
+        <h3>${i + 1}. ${esc(region.name)} 주변 · ${esc(status)}</h3>
+        <p>활동 후보 충족 ${region.coverage_percent}% · 반경 ${region.radius_km}km</p>
+        ${state.directionalResult ? SeoulRouteView.venueDetails(selected || region.draft_route)
+          : SeoulRouteView.recommendationList(routes, selected, i, region.start_location, state.analyzedText)}
+        ${markets.map(market => `<div class="market-food-options">
+          <strong>${esc(market.name)} 주변 먹거리</strong>
+          <ul>${market.food_options.map(food => `<li>${/^https?:\/\//i.test(food.place_url || '')
+            ? `<a href="${esc(food.place_url)}" target="_blank" rel="noopener noreferrer">${esc(food.name)}</a>`
+            : esc(food.name)}${food.menus?.length ? ` · ${esc(food.menus.join(' / '))} (${esc(food.menu_source)})`
+              : food.menu_hint ? ` · 상호의 단서 ${esc(food.menu_hint)}` : ''}${SeoulRouteView.venuePhone(food.phone)}</li>`).join('')}</ul>
+          <p>메뉴와 방문일 영업시간 확인 필요</p>
+        </div>`).join('')}
+        <p>${region.candidate_groups.map(g => `${esc(activityNames[g.category] || g.category)} ${g.places.length}곳`).join(' · ')}</p>
+        ${region.first_leg && region.first_leg.status === 'needs_origin' ? '<p>현재 위치를 적용하면 출발·복귀 시간을 계산할 수 있습니다.</p>' : ''}
+        ${region.first_leg && region.first_leg.planned_departure ? `<p>${esc(region.first_leg.planned_departure)} 출발${region.first_leg.estimated_arrival ? ` → ${esc(region.first_leg.estimated_arrival)} 목적지 도착 추정` : ' · 도착 시각은 출발 위치 적용 후 계산'}</p>` : ''}
+        ${region.missing_activities.length ? `<p>찾지 못한 조건: ${esc(region.missing_activities.join(', '))}</p>` : ''}
+        ${timeline.length ? `<p>${timeline.map(t => `${t.estimated_start}~${t.estimated_end} ${esc(activityNames[t.category] || t.category)}`).join(' → ')}</p>` : ''}
+        ${(selected || region.draft_route)?.schedule?.conflicts?.length ? `<p>${(selected || region.draft_route).schedule.conflicts.map(c => `${esc(c.reason)} ${c.shortage_minutes}분`).join(' · ')}</p>` : ''}
+        <details><summary>방문 전 확인할 사항</summary><ul>${(selected?.cautions || region.checks_needed).map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+          ${region.candidate_groups.map(g => g.places.map(p => p.place_url ? `<p><a href="${esc(p.place_url)}" target="_blank" rel="noopener noreferrer">${esc(p.name)} 장소 정보</a>${p.phone ? ' · ' + esc(p.phone) : ''}</p>` : '').join('')).join('')}</details>
+        <button class="ghost select-region" type="button" data-region="${i}">이 지역 지도·일정 보기</button>
+      </article>`;
+    }).join('') || '<p>지역 후보를 찾지 못했습니다. 안내에 따라 조건이나 위치를 확인해 주세요.</p>';
+    panel.querySelectorAll('.select-region').forEach(button => button.addEventListener('click', () =>
+      selectRegion(Number(button.dataset.region), 0, {preserveZoom:true})));
+  }
+
+  function selectRegion(index, routeIndex = 0, mapOptions) {
+    const region = state.regions[index]; if (!region) return;
+    const initialSelection = !state.selectedRegion;
+    state.selectedRegion = region; state.searchCenter = region.search_center; state.routeStart = region.start_location;
+    state.locationFromQuestion = true; state.locationError = null;
+    state.parsed.search_center = region.search_center; state.parsed.start_location = region.start_location;
+    (region.evaluated_activities || []).forEach((activity, i) => {
+      const current = state.parsed.activities[i];
+      if (current && current.duration_estimated && activity.duration_source === '출발 후 이동 추정을 제외한 산행 가능 시간창') {
+        Object.assign(current, activity);
+      }
+    });
+    $('originNotice').hidden = !(region.first_leg && region.first_leg.status === 'needs_origin');
+    state.parsed.location_context.reason = '활동 조합을 비교한 지역 후보 · 실제 방문 확인 필요';
+    const regionRoutes = region.routes || (region.draft_route ? [region.draft_route] : []);
+    state.routes = state.directionalResult?.recommendations || regionRoutes;
+    const route = regionRoutes[routeIndex];
+    state.selectedRoute = route && !route.preview ? route : null;
+    state.previewRoute = route?.preview ? route : null;
+    state.journeyFilter = 'all';
+    $('scheduleDetail').hidden = true;
+    reportCache = {};
+    lastPlaces = region.places; lastScores = {};
+    $('lat').value = region.search_center.latitude; $('lng').value = region.search_center.longitude;
+    if (initialSelection) $('radius').value = region.radius_km;
+    $('locationName').value = region.name;
+    setGpsStatus(`${region.name} · 지역 후보 · 방문 조건 확인 필요`, 'warn');
+    renderCurrentMap(mapOptions); renderSchedule(); renderCharts(lastPlaces, lastScores); renderParsedPlan();
+    renderRecommendations();
+    SeoulRouteView.renderReport($('reportBody'), reportFor(state.selectedRoute));
+    $('simLog').innerHTML = ''; simReset(); renderAlarms();
+    const needsOrigin = region.first_leg && region.first_leg.status === 'needs_origin';
+    $('scrubLabel').textContent = state.selectedRoute ? '검토용 일정 · 방문 시간과 실제 이동 확인 필요'
+      : needsOrigin ? '주변 시설 검색 완료 · 출발 위치 적용 후 이동·일정 계산'
+      : region.status === 'missing_places' ? '필수 활동의 장소를 모두 찾지 못했습니다.' : '이 지역에 표시할 추천 일정이 없습니다.';
+    if (needsOrigin && !region.draft_route) {
+      $('scheduleTable').querySelector('tbody').innerHTML = '<tr><td colspan="6">현재 위치를 적용하면 출발·복귀 이동시간을 계산합니다. 주변 시설은 후보 목록에서 확인할 수 있습니다.</td></tr>';
+    }
+    if (state.planEdited && state.selectedRoute) revalidate();
+  }
+
   function inputs() {
     return {
       text: $('question').value.trim(),
@@ -605,28 +861,120 @@
   async function analyze() {
     const cfg = inputs();
     if (!cfg.text) { toast('질문을 입력하거나 음성으로 말해 주세요.'); return; }
+    if ($('analyzeBtn').disabled) return;
+    $('analyzeBtn').disabled = true;
+    const buttonLabel = $('analyzeBtn').textContent;
+    $('analyzeBtn').textContent = '분석 중…';
+    $('eventOptions').hidden = true;
     try {
-      state.parsed = await post('/api/parse', { text: cfg.text });
+      // 질문에서 얻은 지난 검색 중심을 새 질문의 수동 위치로 재사용하지 않는다.
+      const hasCoordinates = $('lat').value.trim() !== '' && $('lng').value.trim() !== '';
+      const fallback = state.originLocation || (state.locationFromQuestion ? null : {
+        type: state.gps.used && state.gps.source === 'gps' ? 'current_location' : state.gps.source === 'ip' ? 'ip_estimate' : 'custom',
+        name: $('locationName').value.trim() || null,
+        latitude: hasCoordinates ? Number($('lat').value) : null,
+        longitude: hasCoordinates ? Number($('lng').value) : null
+      });
+      state.parsed = await post('/api/parse', { text: cfg.text, fallback_location: fallback,
+        fallback_radius_km: cfg.radius });
+      state.analyzedText = cfg.text;
       // 문장에서 인식한 날짜가 UI 날짜보다 우선한다.
       state.startDate = state.parsed.travel_date || cfg.date;
-      $('parseWarnings').textContent = (state.parsed.warnings || []).join(' ');
+      $('parseWarnings').textContent = [state.parsed.analysis_method === 'legacy' ? '문맥 분석 미활성 · 기존 분석 모드' : '',
+        ...(state.parsed.warnings || [])].filter(Boolean).join(' · ');
+      const events = state.parsed.event_options || [];
+      const officialLinks = state.parsed.event_links || [];
+      const eventOptions = $('eventOptions');
+      const safeLink = (url, label) => /^https:\/\//i.test(url || '')
+        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>` : '';
+      eventOptions.innerHTML = events.map(event => `<li>${esc(event.date)} ${esc(event.start_time)} · ${esc(event.name)} · ${esc(event.venue)}${
+        event.source_url ? ` · ${safeLink(event.source_url, event.source || '일정 출처')}` : ''}</li>`).join('')
+        + officialLinks.map(link => `<li>${safeLink(link.url, link.label)}</li>`).join('');
+      eventOptions.hidden = !(events.length || officialLinks.length);
+      renderParsedPlan();
+      const context = state.parsed.location_context || {};
+      state.regions = []; state.selectedRegion = null; state.directionalResult = null;
+      state.planEdited = false; $('regionPanel').hidden = true;
+      state.previewRoute = null;
+      $('recommendationPanel').hidden = true;
+      state.journeyFilter = 'all';
+      $('originNotice').hidden = !context.needs_current_location;
+      if (state.parsed.planning_mode === 'region_discovery' || (state.parsed.live_place_plan && !context.needs_confirmation)) {
+        $('regionPanel').hidden = false;
+        $('regionNote').textContent = '목적지와 선택 반경 내 활동 시설을 검색하고 있습니다…';
+        $('regionList').innerHTML = '';
+        state.routes = []; state.selectedRoute = null; lastPlaces = []; lastScores = {};
+        renderCurrentMap();
+        renderSchedule(); renderCharts([], {});
+        const result = await post('/api/regions/recommend', {
+          region_scope: state.parsed.region_scope, travel_date: state.startDate,
+          search_center: state.parsed.search_center,
+          start_location: state.parsed.start_location,
+          return_location: state.parsed.return_location,
+          destination_name: context.mountain_name || (state.parsed.search_center && state.parsed.search_center.name),
+          current_location_requested: state.parsed.current_location_requested || false,
+          contextual: state.parsed.analysis_method === 'context',
+          requested_bearing: state.parsed.requested_bearing,
+          route_goal: state.parsed.route_goal,
+          departure_time: state.parsed.departure_time,
+          activities: state.parsed.activities, radius_km: state.parsed.radius_km,
+          transport_modes: cfg.modes
+        });
+        state.regions = result.regions || [];
+        if (result.recommendations) {
+          // JSON에서 지역별·전체 목록은 별도 객체이므로 지도와 선택 목록은 같은 객체를 참조한다.
+          state.directionalResult = result;
+          const recommendationsByRank = new Map(result.recommendations.map(route => [route.rank, route]));
+          state.regions.forEach(region => {
+            region.routes = region.routes.map(route => recommendationsByRank.get(route.rank));
+            if (region.draft_route) region.draft_route = recommendationsByRank.get(region.draft_route.rank);
+          });
+        }
+        $('regionNote').textContent = [result.note, ...(result.warnings || [])].join(' ');
+        if (state.regions.length) selectRegion(0);
+        else {
+          state.locationError = (result.warnings || []).join(' ') || '지역 후보를 찾지 못했습니다.';
+          renderCurrentMap(); renderRecommendations();
+        }
+        toast(`지역 후보 ${state.regions.length}곳을 비교했습니다. 방문 전 확인사항을 확인해 주세요.`);
+        return;
+      }
+      if (context.needs_confirmation || !state.parsed.search_center) {
+        state.locationError = context.error || '검색 기준점을 지정해 주세요.';
+        state.routes = []; state.selectedRoute = null; state.searchCenter = null; state.routeStart = null;
+        lastPlaces = []; lastScores = {}; reportCache = {};
+        renderCurrentMap(); renderSchedule(); renderCharts([], {});
+        SeoulRouteView.render($('routeList'), [], () => {});
+        SeoulRouteView.renderReport($('reportBody'), null);
+        toast(state.locationError); return;
+      }
+      state.locationError = null;
+      state.searchCenter = state.parsed.search_center;
+      state.routeStart = state.parsed.start_location;
+      state.locationFromQuestion = !!context.center_name;
+      cfg.lat = state.searchCenter.latitude; cfg.lng = state.searchCenter.longitude;
+      cfg.radius = state.parsed.radius_km;
+      $('lat').value = cfg.lat; $('lng').value = cfg.lng;
+      $('radius').value = cfg.radius;
+      $('locationName').value = state.searchCenter.name || '지정한 위치';
+      setGpsStatus(`${state.searchCenter.name || '지정한 위치'} · ${context.reason || '사용자 지정'} · ${cfg.radius}km`, 'ok');
       const activities = state.parsed.activities;
       const interests = [];
       activities.forEach(a => { (a.keywords || []).forEach(k => interests.push(k)); if (a.keyword) interests.push(a.keyword); });
-      const startLocation = { type: state.gps.used ? 'current_location' : state.parsed.start_location.type,
-        latitude: cfg.lat, longitude: cfg.lng };
+      const startLocation = state.routeStart;
       const direction = await post('/api/directions/analyze', {
         latitude: cfg.lat, longitude: cfg.lng, radius_km: cfg.radius,
         weights: cfg.weights, interests });
       const search = await post('/api/places/search', {
         latitude: cfg.lat, longitude: cfg.lng, radius_km: cfg.radius, limit: 30 });
       const result = await post('/api/routes/recommend', {
-        start_location: startLocation, activities, radius_km: cfg.radius,
+        start_location: startLocation, search_center: state.searchCenter, activities, radius_km: cfg.radius,
         transport_modes: cfg.modes, weights: cfg.weights });
       state.routes = result.routes || [];
       state.selectedRoute = state.routes[0] || null;
       lastPlaces = search.places; lastScores = direction.scores;
       renderCurrentMap(); renderSchedule(); renderCharts(search.places, direction.scores);
+      renderRecommendations();
       renderParsedPlan();
       try {
         const densityData = await post('/api/density/analyze', {
@@ -639,20 +987,23 @@
       renderAlarms();
       await renderSafety();
       await analyzeTransport(null);
-      SeoulRouteView.render($('routeList'), state.routes, (route) => {
-        state.selectedRoute = route;
-        $('scheduleDetail').hidden = true;
-        renderSchedule(); renderCharts(lastPlaces, lastScores);
-        SeoulRouteView.renderReport($('reportBody'), reportFor(route));
-        toast('경로를 선택했습니다.');
-      });
       SeoulRouteView.renderReport($('reportBody'), reportFor(state.selectedRoute));
       toast(`경로 ${state.routes.length}개를 추천했습니다.`);
-    } catch (err) { toast(err.message || '분석 중 오류가 발생했습니다.'); }
+    } catch (err) {
+      $('parseWarnings').textContent = err.message || '분석 중 오류가 발생했습니다.';
+      toast($('parseWarnings').textContent);
+    }
+    finally { $('analyzeBtn').disabled = false; $('analyzeBtn').textContent = buttonLabel; }
   }
 
   /* ---------- GPS ---------- */
   function applyPosition(pos, fromWatch) {
+    state.originLocation = pos.source === 'ip' ? null : {
+      type: pos.source === 'gps' ? 'current_location' : 'custom', source: pos.source,
+      name: pos.source === 'gps' ? '현재 GPS 위치' : '지도에서 선택한 출발 위치',
+      latitude: pos.latitude, longitude: pos.longitude
+    };
+    state.locationFromQuestion = false; state.searchCenter = null; state.routeStart = null; state.locationError = null;
     $('lat').value = Number(pos.latitude).toFixed(4);
     $('lng').value = Number(pos.longitude).toFixed(4);
     state.gps = { used: true, source: pos.source, accuracy: pos.accuracy };
@@ -661,6 +1012,11 @@
     setGpsStatus(`${pos.source === 'gps' ? 'GPS' : 'IP 추정'} 위치 ${Number(pos.latitude).toFixed(4)}, ${Number(pos.longitude).toFixed(4)}${accuracy}`, pos.source === 'gps' ? 'ok' : 'warn');
     renderCurrentMap();
     if (!fromWatch) toast('현재 위치를 출발지로 적용했습니다.');
+    if (state.resumeAfterLocation && !fromWatch) {
+      state.resumeAfterLocation = false;
+      if (pos.source === 'gps') analyze();
+      else toast('현재 GPS 위치를 확인하지 못했습니다. 출발 좌표를 직접 입력하고 다시 분석해 주세요.');
+    }
   }
 
   $('geoBtn').addEventListener('click', () => {
@@ -669,6 +1025,10 @@
       msg => { setGpsStatus(msg, 'warn'); toast(msg); },
       (text, kind) => setGpsStatus(text, kind)
     );
+  });
+  $('planGeoBtn').addEventListener('click', () => {
+    state.resumeAfterLocation = true;
+    $('geoBtn').click();
   });
   $('gpsWatchBtn').addEventListener('click', () => {
     if (state.watchId != null) {
@@ -686,12 +1046,16 @@
     }
   });
   $('compass').addEventListener('click', (e) => {
+    // 카카오 SDK 내부 SVG는 자체 좌표계이므로 도표용 클릭 변환에서 제외한다.
+    if (state.kakaoKey && state.mapMode === 'geo' && !state.kakaoFailed) return;
     const svg = $('compass').querySelector('svg'); if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 600;
-    const y = ((e.clientY - rect.top) / rect.height) * 600;
+    const point = svg.createSVGPoint(); point.x = e.clientX; point.y = e.clientY;
+    const local = point.matrixTransform(svg.getScreenCTM().inverse());
     const cfg = inputs();
-    const p = SeoulMapHelper.screenToLatLng(x, y, 600, cfg.lat, cfg.lng, cfg.radius);
+    const extent = state.mapMode === 'geo' ? 275 : 245;
+    const p = { latitude: cfg.lat + (300 - local.y) / extent * cfg.radius / 111,
+      longitude: cfg.lng + (local.x - 300) / extent * cfg.radius / (111 * Math.cos(cfg.lat * Math.PI / 180)),
+      source: 'map', city: '' };
     applyPosition(p, false);
     toast('지도에서 출발지를 선택했습니다.');
   });
@@ -728,7 +1092,7 @@
     const cfg = inputs();
     const payload = {
       date: state.startDate || new Date().toISOString().slice(0,10), user_id: 'local_user',
-      start_location: { type: state.gps.used ? 'current_location' : 'custom',
+      start_location: state.routeStart || { type: state.gps.used ? 'current_location' : 'custom',
         latitude: cfg.lat, longitude: cfg.lng, name: $('locationName').value },
       activities: state.parsed.activities, routes: state.routes };
     if (state.tripId) payload.trip_id = state.tripId;
@@ -742,6 +1106,7 @@
     const data = await request('/api/trips');
     SeoulHistoryView.render($('tripList'), data.trips, {
       onReuse: (trip) => {
+        state.locationFromQuestion = false; state.searchCenter = null; state.routeStart = null; state.locationError = null;
         $('question').value = (trip.activities || []).map(a=>a.keyword||a.category).join(' ');
         const start = trip.start_location || {};
         if (start.latitude) $('lat').value = start.latitude;
@@ -774,8 +1139,39 @@
 
   /* ---------- 이벤트 ---------- */
   $('quickForm').addEventListener('submit', (e) => { e.preventDefault(); analyze(); });
+  $('networkLookup').addEventListener('click', lookupNetwork);
+  ['regionList', 'recommendationList'].forEach(id => $(id).addEventListener('click', event => {
+    const button = event.target.closest('.select-recommendation');
+    if (!button) return;
+    const region = Number(button.dataset.region), index = Number(button.dataset.route);
+    if (region < 0 || state.regions[region] === state.selectedRegion) selectGlobalRecommendation(state.routes[index]);
+    else selectRegion(region, index, {preserveZoom:true});
+  }));
   $('mapModeGeo').addEventListener('click', () => { state.mapMode = 'geo'; renderCurrentMap(); });
   $('mapModePolar').addEventListener('click', () => { state.mapMode = 'polar'; renderCurrentMap(); });
+  $('journeyFilter').addEventListener('change', () => {
+    state.journeyFilter = $('journeyFilter').value; renderCurrentMap();
+  });
+  $('journeyToggle').addEventListener('change', () => {
+    state.journeyVisible = $('journeyToggle').checked; renderCurrentMap();
+  });
+  $('mapZoomIn').addEventListener('click', () => {
+    if (!SeoulMapHelper.changeZoom(-1)) SeoulCompassMap.zoom($('compass'), .8);
+  });
+  $('mapZoomOut').addEventListener('click', () => {
+    if (!SeoulMapHelper.changeZoom(1)) SeoulCompassMap.zoom($('compass'), 1.25);
+  });
+  $('mapZoomReset').addEventListener('click', () => {
+    if (!SeoulMapHelper.resetZoom()) SeoulCompassMap.zoom($('compass'), 0);
+  });
+  $('radius').addEventListener('change', renderCurrentMap);
+  ['lat', 'lng', 'locationName'].forEach(id => $(id).addEventListener('change', () => {
+    state.locationFromQuestion = false; state.searchCenter = null; state.routeStart = null; state.locationError = null;
+    state.originLocation = $('lat').value.trim() && $('lng').value.trim() ? {
+      type:'custom', name:'사용자가 지정한 출발 위치', latitude:Number($('lat').value), longitude:Number($('lng').value)
+    } : null;
+    renderCurrentMap();
+  }));
   $('sim3dBtn').addEventListener('click', () => {
     const on = document.body.classList.toggle('sim3d');
     $('sim3dBtn').classList.toggle('active', on);
@@ -804,13 +1200,15 @@
       const cfg = await request('/api/config');
       // 카카오 JavaScript 키는 허용 도메인 제한 하의 공개 키다.
       state.kakaoKey = cfg.kakao_javascript_key || null;
+      renderCurrentMap();
       const h = await request('/api/health');
       $('apiStatus').innerHTML = `<span>서버 상태 <b>${esc(h.status)}</b></span>
         <span>샘플 장소 <b>${h.places}곳</b></span><span>포트 <b>${h.port}</b></span>
         <span>음성 인식 <b>${state.voice ? 'Web Speech API' : '미지원'}</b></span>
         <span>GPS <b>${navigator.geolocation ? '사용 가능' : '미지원'}</b></span>
         <span>지도 제공 <b>${state.kakaoKey ? '카카오맵' : 'SVG (폴백)'}</b></span>
-        <span>외부 경로 API <b>미연동 (추정 경로)</b></span>`;
+        <span>문맥 분석 <b>${cfg.context_analysis ? '활성' : '미활성'}</b></span>
+        <span>공개 메뉴 조회 <b>${cfg.verified_menu_lookup ? '활성' : '미활성'}</b></span>`;
     } catch (err) { $('apiStatus').innerHTML = `<span>서버 오류: ${esc(err.message)}</span>`; }
   }
   $('saveTripBtn').addEventListener('click', saveTrip);

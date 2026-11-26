@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Seoul Compass AI — 관측 데스크</title>
-  <link rel="stylesheet" href="/css/style.css?v=22" />
+  <link rel="stylesheet" href="/css/style.css?v=34" />
 </head>
 <body data-theme="light">
   <!-- 상단: 인라인 질문 -->
@@ -38,11 +38,15 @@
         <button type="button" data-view="settings" title="설정">⚙<small>설정</small></button>
       </nav>
       <div class="rail-body">
-        <p class="eyebrow">START POINT</p>
+        <p class="eyebrow">검색 기준점 · 출발 위치</p>
         <div class="gps-box">
           <div class="row"><button id="geoBtn" class="primary full" type="button">◎ 현재 위치 사용</button></div>
           <div class="row"><button id="gpsWatchBtn" class="ghost full" type="button">실시간 추적 시작</button></div>
           <p id="gpsStatus" class="gps-status">GPS 대기 · 위치 권한 필요</p>
+        </div>
+        <div id="originNotice" class="gps-box" hidden>
+          <p class="hint">출발·복귀 구간을 계산하려면 현재 위치를 적용하거나 위치를 직접 선택한 뒤 다시 분석해 주세요.</p>
+          <button id="planGeoBtn" class="primary full" type="button">현재 위치 적용 후 다시 분석</button>
         </div>
         <div class="grid-form">
           <div><label for="lat">위도</label><input id="lat" type="number" step="0.0001" placeholder="GPS 또는 지도 선택" /></div>
@@ -66,13 +70,40 @@
           </div>
         </details>
         <p id="parseWarnings" class="warn"></p>
+        <ul id="eventOptions" class="hint" hidden></ul>
       </div>
     </aside>
 
     <!-- 중앙: 지도 -->
     <section id="map" class="map-stage">
       <div id="compass" class="compass"></div>
+      <div class="map-controls" role="group" aria-label="지도 확대·축소">
+        <button id="mapZoomIn" type="button" aria-label="지도 확대" title="지도 확대">+</button>
+        <button id="mapZoomOut" type="button" aria-label="지도 축소" title="지도 축소">−</button>
+        <button id="mapZoomReset" type="button" aria-label="검색 반경 전체 보기" title="검색 반경 전체 보기">전체</button>
+      </div>
       <div class="map-caption"><span class="dot"></span><span id="mapCaption">출발지 미설정 · GPS 또는 지도 선택</span></div>
+      <div id="journeyPanel" class="journey-panel" hidden>
+        <div class="journey-toolbar">
+          <label><input id="journeyToggle" type="checkbox" checked>시간대 동선</label>
+          <select id="journeyFilter" aria-label="지도 동선 시간대"><option value="all">전체 동선</option></select>
+        </div>
+        <p id="journeyNote"></p>
+        <p id="journeyGuide"></p>
+        <div class="journey-toolbar network-toolbar">
+          <select id="networkMode" aria-label="실제 경로 이동수단">
+            <option value="walking">도보</option><option value="cycling">자전거</option>
+            <option value="driving">자동차</option><option value="subway">지하철</option>
+            <option value="train">기차</option>
+          </select>
+          <button id="networkLookup" type="button">선택 경로의 실제 길 조회</button>
+        </div>
+        <p id="networkStatus" aria-live="polite"></p>
+        <p id="networkCredits" hidden>
+          © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>
+          · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener noreferrer">지도 수정</a>
+        </p>
+      </div>
       <div id="compassLegend" class="compass-legend"></div>
     </section>
 
@@ -80,13 +111,22 @@
     <aside class="rail-right">
       <div class="insight-head"><p class="eyebrow">INSIGHT PANEL</p><h2 id="insightTitle">시각화</h2></div>
       <div class="insight-scroll">
+        <section id="recommendationPanel" class="chart-box" hidden>
+          <p id="recommendationCoverage" class="hint"></p>
+          <div id="recommendationList"></div>
+        </section>
+        <section id="regionPanel" class="chart-box" hidden>
+          <div class="chart-title">활동 조건에 맞는 지역 후보</div>
+          <p id="regionNote" class="hint"></p>
+          <div id="regionList" class="route-list"></div>
+        </section>
         <div class="view-panel" data-panel="console">
           <div id="kpiGrid" class="kpi-grid"></div>
           <div class="chart-box"><div class="chart-title">주변 장소 목록 <span id="placeCount" class="badge">0곳</span></div><div id="placeListPanel" class="table-wrap"></div></div>
           <div class="chart-box"><div class="chart-title">업종 분포</div><div id="categoryDonut"></div></div>
           <div class="chart-box"><div class="chart-title">방향 오빗 링</div><div id="directionOrbit"></div></div>
           <div class="chart-box"><div class="chart-title">방향 로즈 · 점수</div><div id="directionRose"></div><div id="scoreBars"></div><div id="directionScores" class="score-list"></div></div>
-          <div class="chart-box"><div class="chart-title">TOP3 경로 비교 레이더</div><div id="routeRadar"></div></div>
+          <div class="chart-box"><div class="chart-title">추천 경로 비교</div><div id="routeRadar"></div></div>
           <div class="chart-box"><div class="chart-title">이동 흐름도</div><div id="flowRibbon"></div></div>
           <div class="chart-box"><div class="chart-title">경로 프로필</div><div id="routeProfile"></div></div>
           <div class="chart-box"><div class="chart-title">혼잡 호라이즌 · 히트맵</div><div id="crowdHorizon"></div><div id="crowdHeat" class="heat-grid"></div></div>
@@ -148,7 +188,7 @@
             <div id="scheduleDetail" class="detail-panel" hidden></div>
           </section>
           <section id="routes" class="inner-section">
-            <div class="section-head"><p class="eyebrow">TOP ROUTES</p><h2>추천 경로 3선</h2></div>
+            <div class="section-head"><p class="eyebrow">TOP ROUTES</p><h2>추천 경로</h2></div>
             <div id="routeList" class="route-list"></div>
           </section>
           <section id="report" class="inner-section">
@@ -193,13 +233,14 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/js/charts.js?v=22"></script>
-  <script src="/js/compass.js?v=22"></script>
-  <script src="/js/map.js?v=22"></script>
-  <script src="/js/schedule.js?v=22"></script>
-  <script src="/js/route.js?v=22"></script>
+  <script src="/js/charts.js?v=34"></script>
+  <script src="/js/journey.js?v=37"></script>
+  <script src="/js/compass.js?v=31"></script>
+  <script src="/js/map.js?v=33"></script>
+  <script src="/js/schedule.js?v=37"></script>
+  <script src="/js/route.js?v=36"></script>
   <script src="/js/history.js?v=22"></script>
-  <script src="/js/i18n.js?v=22"></script>
-  <script src="/js/app.js?v=22"></script>
+  <script src="/js/i18n.js?v=27"></script>
+  <script src="/js/app.js?v=38"></script>
 </body>
 </html>

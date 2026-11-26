@@ -39,23 +39,37 @@ def validate_schedule(activities: List[Dict], route: Dict,
 
     for i, activity in enumerate(activities):
         # 고정 시간이 없으면 희망 시간(earliest/preferred)을 시작 기준으로 사용한다.
-        start = (to_minutes(activity.get("start_time"))
-                 or to_minutes(activity.get("earliest_start"))
-                 or to_minutes(activity.get("preferred_time")))
+        start = next((value for value in (to_minutes(activity.get('start_time')),
+                      to_minutes(activity.get('earliest_start')), to_minutes(activity.get('preferred_time')))
+                      if value is not None), None)
         place = nodes[i]["place"] if i < len(nodes) else {}
-        duration = int(activity.get("duration_minutes") or 60)
-        arrive = cursor if cursor is not None else start
+        duration = int(activity['duration_minutes']) if activity.get('duration_minutes') is not None else 60
+        travel = int(nodes[i].get('travel_minutes') or 0) if i < len(nodes) else 0
+        departure = to_minutes(route.get('departure_time'))
+        arrive = (cursor + travel + buffer_minutes if cursor is not None else
+                  departure + travel + (buffer_minutes if travel else 0) if departure is not None else start)
         if arrive is None:
             arrive = 9 * 60
         real_start = max(arrive, start) if start is not None else arrive
         end = real_start + duration
 
-        if start is not None and real_start > start + buffer_minutes:
+        if activity.get('fixed_time') and start is not None and real_start > start:
             conflicts.append({
                 "activity_id": activity.get("id"),
                 "reason": "고정 시간을 이동시간 때문에 초과했습니다.",
                 "shortage_minutes": real_start - start,
             })
+        for field in ('end_time', 'latest_end'):
+            deadline = to_minutes(activity.get(field))
+            if deadline is not None and end > deadline:
+                conflicts.append({'activity_id': activity.get('id'), 'reason': '지정한 종료시각을 초과했습니다.',
+                                  'shortage_minutes': end - deadline})
+        if duration < 0 or (duration == 0 and activity['category'] not in ('return_to_start', 'return_to_current', 'destination')):
+            conflicts.append({'activity_id': activity.get('id'), 'reason': '활동 시작·종료시간을 확인해 주세요.',
+                              'shortage_minutes': 0})
+        if not place and activity.get('required', True):
+            conflicts.append({'activity_id': activity.get('id'), 'reason': '필수 활동의 장소가 없습니다.',
+                              'shortage_minutes': 0})
 
         timeline.append({
             "activity_id": activity.get("id"),
@@ -65,9 +79,11 @@ def validate_schedule(activities: List[Dict], route: Dict,
             "estimated_start": to_clock(real_start),
             "estimated_end": to_clock(end),
             "duration_minutes": duration,
+            "duration_estimated": activity.get('duration_estimated', True),
+            "travel_minutes": travel,
             "fixed_time": bool(activity.get("fixed_time")),
         })
-        cursor = end + buffer_minutes
+        cursor = end
 
     return {
         "timeline": timeline,

@@ -4,15 +4,17 @@
 
   // 절제된 라이트 톤: 골드·네이비·세이지 기반의 고급 팔레트
   const COLORS = {
-    hiking:'#4f9d69', shower:'#4a8fb8', meeting:'#c07a3c', restaurant:'#b45f54',
+    hiking:'#4f9d69', swimming:'#268bb5', shower:'#4a8fb8', meeting:'#c07a3c', restaurant:'#b45f54',
     bowling:'#7d6bb5', international_tourism_area:'#2f8f83', subway_station:'#5479b0',
     shopping:'#b8914e', attraction:'#a86a8f', night_view:'#6b5ba8', park:'#5d9b6f',
-    cafe:'#b8805e', culture:'#8a76ad', bar:'#a85a55'
+    cafe:'#b8805e', culture:'#8a76ad', bar:'#a85a55', history_museum:'#6767a4',
+    palace:'#a85a55', market_food:'#b8805e'
   };
   const SECTOR_COLORS = ['#b45f54','#c08a4a','#b8914e','#6f9b6a','#2f8f83','#5479b0','#6b5ba8','#9b6aa0'];
-  const NAMES_KO = { hiking:'등산', shower:'샤워', meeting:'약속', restaurant:'식사', bowling:'볼링',
+  const NAMES_KO = { hiking:'등산', swimming:'수영', shower:'샤워', meeting:'약속', restaurant:'식사', bowling:'볼링',
     international_tourism_area:'국제관광', subway_station:'지하철', shopping:'쇼핑', attraction:'명소',
-    night_view:'야경', park:'공원', cafe:'카페', culture:'문화', bar:'주점' };
+    night_view:'야경', park:'공원', cafe:'카페', culture:'문화', bar:'주점',
+    history_museum:'역사 박물관', palace:'고궁', market_food:'시장 먹거리' };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
 
@@ -38,9 +40,9 @@
     const cards = [
       { label:'검색 장소', value:places.length, sub:`${Object.keys(counts).length}개 업종`, color:'#4fe0c4', spark:values },
       { label:'분석 방향', value:Object.keys(scores).length, sub:'8구역 · 45도', color:'#7c5cff', spark:Object.values(scores) },
-      { label:'추천 경로', value:routes.length, sub:'TOP 3', color:'#ffc857', spark:routes.map((r) => r.score) },
-      { label:'일정 충돌', value:conflicts, sub:conflicts ? '확인 필요' : '충돌 없음', color:conflicts ? '#ff6b8a' : '#7cd992', spark:[1, conflicts || 0, 1] },
-      { label:'데이터 신뢰도', value:confidence + '%', sub:'최상위 경로', color:'#58c8ff', spark:[40, 70, confidence] }
+      { label:data.regionMode ? '후보 동선' : '추천 경로', value:data.regionMode ? data.draftCount : routes.length, sub:data.regionMode ? '실제 방문 미검증' : '최대 5개', color:'#ffc857', spark:routes.map((r) => r.score) },
+      { label:'일정 충돌', value:conflicts, sub:data.regionMode ? '입력 시간·이동 추정 기준' : (conflicts ? '확인 필요' : '충돌 없음'), color:conflicts ? '#ff6b8a' : '#7cd992', spark:[] },
+      { label:'데이터 신뢰도', value:data.regionMode ? '확인 필요' : confidence + '%', sub:data.regionMode ? '장소명·위치만 조회' : '최상위 경로', color:'#58c8ff', spark:data.regionMode ? [] : [40, 70, confidence] }
     ];
     container.innerHTML = cards.map((c) => `<div class="kpi" style="--kpi-color:${c.color}">
       <div class="kpi-label">${esc(c.label)}</div><div class="kpi-value">${esc(c.value)}</div>
@@ -168,7 +170,7 @@
 
   /* 관측 데스크용 고급 시각화 */
 
-  // TOP3 경로를 4개 축으로 겹쳐 비교하는 레이더
+  // 추천 경로를 4개 축으로 겹쳐 비교하는 레이더
   function routeRadar(container, routes) {
     if (!container) return;
     if (!routes || !routes.length) { container.innerHTML = '<p class="hint">분석 후 표시됩니다.</p>'; return; }
@@ -179,8 +181,8 @@
       return [cx + R * v * Math.cos(a), cy + R * v * Math.sin(a)];
     };
     const rings = [0.25, 0.5, 0.75, 1].map((k) => `<polygon points="${[0,1,2,3].map(i=>pt(i,k).map(n=>n.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="var(--line)"/>`).join('');
-    const colors = ['#b8914e', '#2f8f83', '#b45f54'];
-    const shapes = routes.slice(0, 3).map((r, idx) => {
+    const colors = global.SeoulJourney.ROUTE_COLORS;
+    const shapes = routes.map((r, idx) => {
       const vals = [
         Math.min(1, r.score / 100),
         Math.max(0.15, 1 - r.total_travel_minutes / 400),
@@ -193,7 +195,7 @@
     }).join('');
     const labels = axes.map((a,i)=>{ const [x,y]=pt(i,1.22); return `<text x="${x.toFixed(0)}" y="${y.toFixed(0)}" text-anchor="middle" font-size="8" fill="var(--muted)">${a}</text>`; }).join('');
     container.innerHTML = `<svg viewBox="0 0 180 180" style="width:100%;max-width:180px;display:block;margin:auto">${rings}${shapes}${labels}</svg>
-      <div class="legend">${routes.slice(0,3).map((r,i)=>`<span><i style="background:${colors[i]}"></i>${i+1}위 ${r.score}점</span>`).join('')}</div>`;
+      <div class="legend">${routes.map((r,i)=>`<span><i style="background:${colors[i]}"></i>${i+1}위 ${r.score}점</span>`).join('')}</div>`;
   }
 
   // 활동 간 이동 흐름도 (단순 새니키 리본)

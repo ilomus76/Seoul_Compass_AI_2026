@@ -9,14 +9,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ai_parser, density, history, optimizer, report, safety, schedule, weather
-from .config import FRONTEND_DIR, HOST, KAKAO_JAVASCRIPT_KEY, PORT
+from . import ai_parser, context_parser, density, history, network_routes, optimizer, report, safety, schedule, weather
+from .config import CONTEXT_LLM_ENABLED, FRONTEND_DIR, HOST, KAKAO_JAVASCRIPT_KEY, PORT, TOUR_API_KEY
 from .direction import analyze_directions, calculate_bearing, get_direction
 from .places import find_by_keywords, load_places, search_places
+from .location_context import apply_location_context
+from .region_planner import recommend_regions
 from .scoring import score_directions, score_place
 from .schemas import (DirectionAnalyzeRequest, ParseRequest, ReportRequest,
                       RouteRecommendRequest, ScheduleValidateRequest,
-                      SearchRequest, TripCreate, VisitCreate)
+                      SearchRequest, TripCreate, VisitCreate, RegionRecommendRequest, NetworkRouteRequest)
 
 app = FastAPI(title="Seoul Compass AI", version="1.0",
               description="360도 공간 분석과 시간 제약 기반 경로 추천 MVP")
@@ -32,7 +34,14 @@ def health() -> Dict:
 @app.post("/api/parse")
 def parse(req: ParseRequest) -> Dict:
     """자연어 질문을 활동/시간 구조로 변환한다."""
-    return ai_parser.parse_user_request(req.text)
+    fallback = req.fallback_location.model_dump() if req.fallback_location else None
+    if req.analysis_mode == 'context' or (req.analysis_mode is None and CONTEXT_LLM_ENABLED):
+        try:
+            return context_parser.resolve_intent(context_parser.analyze_text(req.text), fallback, req.fallback_radius_km)
+        except context_parser.ContextAnalysisError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+    result = apply_location_context(ai_parser.parse_user_request(req.text), req.text, fallback, req.fallback_radius_km)
+    return {**result, 'analysis_method': 'legacy'}
 
 
 @app.post("/api/places/search")
@@ -46,6 +55,12 @@ def place_search(req: SearchRequest) -> Dict:
         place["direction"] = get_direction(place["bearing"])
     return {"places": places, "count": len(places),
             "note": "샘플 데이터이며 직선거리 기준입니다."}
+
+
+@app.post('/api/regions/recommend')
+def region_recommend(req: RegionRecommendRequest) -> Dict:
+    """목적지 미정 요청의 지역 후보·누락 활동·검토용 일정을 반환한다."""
+    return recommend_regions(req.model_dump())
 
 
 @app.post("/api/directions/analyze")
@@ -65,15 +80,20 @@ def direction_analyze(req: DirectionAnalyzeRequest) -> Dict:
 
 @app.post("/api/routes/recommend")
 def route_recommend(req: RouteRecommendRequest) -> Dict:
-    """활동 순서를 유지한 추천 경로 TOP 3를 반환한다."""
+    """활동 순서를 유지한 추천 경로를 최대 5개 반환한다."""
     data = req.dict()
-    if data["start_location"].get("latitude") is None:
-        data["start_location"]["latitude"] = 37.5665  # 서울시청 기본값
-    if data["start_location"].get("longitude") is None:
-        data["start_location"]["longitude"] = 126.9780
+    for location in (data['start_location'], data.get('search_center')):
+        if location is not None and (location.get('latitude') is None or location.get('longitude') is None):
+            raise HTTPException(status_code=422, detail='검색 기준점과 출발지의 좌표를 먼저 확인해 주세요.')
     routes = optimizer.recommend_routes(data)
     return {"routes": routes, "count": len(routes),
             "note": "직선거리 기반 추정이며 실제 경로 API로 검증되지 않았습니다."}
+
+
+@app.post("/api/routes/network")
+def route_network(req: NetworkRouteRequest) -> Dict:
+    """요청한 구간만 이동수단별 실제 선형으로 조회한다."""
+    return network_routes.lookup(req.mode, [leg.model_dump() for leg in req.legs])
 
 
 @app.post("/api/schedule/validate")
@@ -165,7 +185,8 @@ def route_options(payload: Dict) -> Dict:
     lat = float(payload.get("latitude", 37.5665)); lng = float(payload.get("longitude", 126.9780))
     radius = float(payload.get("radius_km", 5.0))
     result = optimizer.recommend_routes({
-        "start_location": {"latitude": lat, "longitude": lng},
+        "start_location": payload.get('start_location') or {"latitude": lat, "longitude": lng},
+        "search_center": {"latitude": lat, "longitude": lng},
         "activities": payload.get("activities", []), "radius_km": radius,
         "transport_modes": payload.get("transport_modes", ["walking"])})
     options = []
@@ -228,6 +249,8 @@ def frontend_config() -> Dict:
     # JavaScript 키는 도메인 제한 하에 브라우저에 노출되는 공개 키다.
     return {"kakao_javascript_key_configured": bool(KAKAO_JAVASCRIPT_KEY),
             "kakao_javascript_key": KAKAO_JAVASCRIPT_KEY,
+            "context_analysis": CONTEXT_LLM_ENABLED,
+            "verified_menu_lookup": bool(TOUR_API_KEY),
             "map_mode": "kakao" if KAKAO_JAVASCRIPT_KEY else "svg"}
 
 

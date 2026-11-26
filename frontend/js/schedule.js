@@ -8,7 +8,8 @@
     if (!tableBody) return;
     const rows = (schedule && schedule.timeline) || [];
     const colors = (global.SeoulCharts && global.SeoulCharts.COLORS) || {};
-    const names = (global.SeoulCharts && global.SeoulCharts.NAMES_KO) || {};
+    const names = {...global.SeoulCharts?.NAMES_KO, baseball_game:'야구 경기 관람',
+      baseball_event:'야구 행사 관람', return_to_current:'현재 위치 복귀'};
     handlers = handlers || {};
 
     tableBody.innerHTML = rows.length
@@ -17,12 +18,13 @@
           <td>${esc(r.place)}</td>
           <td><input class="time-edit" type="time" data-index="${i}" value="${esc(r.planned_start || r.estimated_start)}" /></td>
           <td>${esc(r.estimated_start)}</td><td>${esc(r.estimated_end)}</td>
-          <td>${r.fixed_time ? '고정' : '추정'}</td></tr>`).join('')
+          <td>${r.fixed_time ? '고정 시각' : '유연 시각'}${r.duration_estimated ? ' · 체류 추정' : ''}<br>
+          <input class="duration-edit" aria-label="${i + 1}번 활동 체류시간(분)" type="number" min="${['return_to_start','return_to_current','destination'].includes(r.category) ? 0 : 1}" max="1440" data-index="${i}" value="${r.duration_minutes}" style="width:64px">분</td></tr>`).join('')
       : '<tr><td colspan="6">분석 결과가 없습니다.</td></tr>';
 
     tableBody.querySelectorAll('.schedule-row').forEach((tr) => {
       tr.addEventListener('click', (e) => {
-        if (e.target.classList.contains('time-edit')) return;
+        if (e.target.matches('.time-edit,.duration-edit')) return;
         if (handlers.onSelect) handlers.onSelect(Number(tr.dataset.index));
       });
     });
@@ -31,6 +33,12 @@
         if (handlers.onTimeChange) handlers.onTimeChange(Number(input.dataset.index), input.value);
       });
     });
+    tableBody.querySelectorAll('.duration-edit').forEach(input => input.addEventListener('change', () => {
+      const value = Number(input.value);
+      if (input.checkValidity() && Number.isInteger(value) && handlers.onDurationChange) {
+        handlers.onDurationChange(Number(input.dataset.index), value);
+      }
+    }));
 
     if (conflictBox) {
       const conflicts = (schedule && schedule.conflicts) || [];
@@ -52,8 +60,8 @@
       <div class="detail-grid">
         <div><b>운영시간</b>${esc(place.hours || '확인 필요')}</div>
         <div><b>이동방법</b>${esc(node.travel_minutes || 0)}분 · ${esc(node.distance_km || 0)}km 추정</div>
-        <div><b>예상 비용</b>${place.fee_krw || 0}원</div>
-        <div><b>추천 점수</b>${place.score || 0}점 · 신뢰도 ${Math.round((place.confidence || 0) * 100)}%</div>
+        <div><b>예상 비용</b>${place.fee_krw == null ? '확인 필요' : place.fee_krw + '원'}</div>
+        <div><b>확인 상태</b>${place.source === 'kakao' ? '장소명·위치 조회 · 실제 방문 미검증' : (place.score || 0) + '점 · 데모 정보 확인 필요'}</div>
         <div><b>교통</b>${esc(place.address || '')}</div>
         <div><b>안내</b>${esc(place.description || '')}</div>
       </div>

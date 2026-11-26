@@ -1,9 +1,26 @@
-/* 추천 경로 TOP 3 렌더링 */
+/* 추천 경로와 선정 근거 렌더링 */
 (function (global) {
   'use strict';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[c]);
+
+  // 알려진 출발지는 별도로 표시하고, 모든 방문점에 분석한 원래 요청 표현을 연결한다.
+  function stopLabels(route, start, requestText) {
+    start = route.start_location || start;
+    const labels = route.nodes.map(node => {
+      const term = node.request_term;
+      return `${node.place.name}${term ? `(${term})` : ''}`;
+    });
+    const first = global.SeoulJourney.nodePoint(route.nodes[0]);
+    if (!route.preview && start?.name && start.latitude != null && start.longitude != null && first
+        && global.SeoulJourney.distance({lat:start.latitude,lng:start.longitude}, first) > 1) {
+      const startName = start.name;
+      const term = requestText?.toLowerCase().includes(startName.toLowerCase()) ? startName : '출발지';
+      labels.unshift(`${startName}(${term})`);
+    }
+    return labels;
+  }
 
   function render(container, routes, onSelect) {
     if (!container) return;
@@ -11,15 +28,15 @@
       container.innerHTML = '<p>추천 경로가 없습니다. 질문에 장소 조건을 포함해 주세요.</p>';
       return;
     }
-    const accents = ['#4fe0c4', '#ffc857', '#ff8fb1'];
+    const accents = global.SeoulJourney.ROUTE_COLORS;
     container.innerHTML = routes.map((r, i) => {
-      const names = r.nodes.map((n) => n.place.name).join(' → ');
+      const names = stopLabels(r).join(' → ');
       const conflict = r.schedule && r.schedule.conflicts && r.schedule.conflicts.length;
       return `<article class="route-card" data-index="${i}" style="--card-accent:${accents[i % accents.length]}">
-        <h3><span class="rank">${i + 1}</span>위 · ${esc(r.direction)} 방향 · ${r.score}점</h3>
+        <h3><span class="rank">${i + 1}</span> ${r.preview ? '후보 동선' : r.verification_status === 'unverified' ? '검토용 일정' : `${esc(r.direction)} 방향 · ${r.score}점`}</h3>
         <p>${esc(names)}</p>
-        <p>거리 ${r.total_distance_km}km · 이동 ${r.total_travel_minutes}분 · 비용 ${r.estimated_cost_krw}원</p>
-        <p>신뢰도 ${Math.round((r.data_confidence || 0) * 100)}% ${conflict ? '· 일정 충돌 있음' : ''}</p>
+        <p>직선 연결 ${r.total_distance_km}km · ${r.preview ? '출발 구간 미포함' : `이동 추정 ${r.total_travel_minutes}분 · 비용 ${r.estimated_cost_krw == null ? '확인 필요' : r.estimated_cost_krw + '원'}`}</p>
+        <p>${r.verification_status === 'unverified' ? '영업시간·산행 코스·실제 이동 경로 미검증' : `신뢰도 ${Math.round((r.data_confidence || 0) * 100)}%`} ${conflict ? '· 일정 충돌 있음' : ''}</p>
         <button type="button" class="ghost select-route">이 경로 선택</button>
       </article>`;
     }).join('');
@@ -28,17 +45,70 @@
     });
   }
 
+  function recommendationList(routes, selected, regionIndex, start, requestText) {
+    if (!routes.length) return '<p class="hint">표시할 추천 경로가 없습니다.</p>';
+    const shortest = Math.min(...routes.map(r => Number(r.total_distance_km)));
+    const quickest = Math.min(...routes.filter(r => r.total_travel_minutes != null).map(r => r.total_travel_minutes));
+    const bestScore = Math.max(...routes.filter(r => r.score != null).map(r => r.score));
+    return `<ol class="recommendation-list">${routes.map((r, i) => {
+      const color = global.SeoulJourney.ROUTE_COLORS[i];
+      const conflicts = r.schedule?.conflicts?.length || 0;
+      const reasons = [
+        `${Number(r.total_distance_km) === shortest ? '표시 경로 중 최단 직선 연결 ' : '직선 연결 '}${r.total_distance_km}km`
+      ];
+      if (r.preview) reasons.push('목적지 주변 활동 조합');
+      else {
+        reasons.push(`${r.total_travel_minutes === quickest ? '표시 경로 중 최소 ' : ''}이동 추정 ${r.total_travel_minutes}분`);
+        reasons.push(conflicts ? `일정 충돌 ${conflicts}건` : '추정 일정에서 시간 충돌 없음');
+      }
+      if (r.score != null) reasons.push(`${r.score === bestScore ? '표시 경로 중 최고 ' : ''}종합 점수 ${r.score}점`);
+      if (r.corridor) {
+        const {heading, variant} = r.corridor;
+        const side = {primary:'좌우 10°', left:'왼쪽 30° 대안', right:'오른쪽 30° 대안'}[variant];
+        reasons.push(`기준 ${Math.round(heading) % 360}° · ${side}`);
+      }
+      const confirmed = r.nodes.filter(node => node.place.menu_status === 'matched');
+      if (confirmed.length) reasons.push(`요청 메뉴 공개 정보 확인 ${confirmed.length}곳`);
+      if (r.nodes.some(node => node.place.menu_status === 'unconfirmed')) reasons.push('요청 메뉴 확인 필요');
+      if (r.nodes.some(node => node.place.venue_condition_unconfirmed)) reasons.push('장소의 세부 조건 확인 필요');
+      const places = stopLabels(r, start, requestText).map(esc).join(' → ');
+      return `<li style="--recommendation-color:${color}">
+        <button type="button" class="select-recommendation" data-region="${regionIndex}" data-route="${i}" aria-pressed="${r === selected}">
+          <strong>추천 ${i + 1}]</strong> <span>${reasons.map(esc).join(' · ')}</span>
+          <small>${places}</small>
+        </button></li>`;
+    }).join('')}</ol>`;
+  }
+
+  function venuePhone(value) {
+    const number = String(value || '').replace(/[\s().-]/g, '');
+    return /^\+?\d{8,13}$/.test(number) ? ` · <a href="tel:${number}">${esc(value)}</a>` : '';
+  }
+
+  function venueDetails(route) {
+    const venues = route?.nodes.map(node => node.place).filter(place =>
+      !place.food_options?.length && (place.menu_status || place.phone || place.place_url)) || [];
+    if (!venues.length) return '';
+    return `<div class="market-food-options"><strong>선택 코스 장소 정보</strong><ul>${venues.map(place => {
+      const title = /^https?:\/\//i.test(place.place_url || '')
+        ? `<a href="${esc(place.place_url)}" target="_blank" rel="noopener noreferrer">${esc(place.name)}</a>` : esc(place.name);
+      const menus = place.menus?.length ? ` · ${esc(place.menus.join(' / '))} (${esc(place.menu_source)})` : '';
+      const check = ['unconfirmed', 'unavailable'].includes(place.menu_status) ? ' · 메뉴 확인 필요' : '';
+      return `<li>${title}${menus}${check}${venuePhone(place.phone)}</li>`;
+    }).join('')}</ul></div>`;
+  }
+
   function renderReport(container, data) {
     if (!container) return;
     if (!data) { container.innerHTML = '<p>리포트가 없습니다.</p>'; return; }
     const list = (title, items) => `<h3>${title}</h3><ul>${items.map((x) => `<li>${esc(x)}</li>`).join('') || '<li>없음</li>'}</ul>`;
     container.innerHTML = `
-      <p>추천 방향: <b>${esc(data.recommended_direction)}</b> · 경로 점수 <b>${data.route_score}</b> · 관심사 충족 <b>${data.interest_satisfaction}%</b></p>
+      <p>${data.verification_status === 'unverified' ? '지역 후보의 검토용 일정 · 실제 방문 가능성 미검증' : `추천 방향: <b>${esc(data.recommended_direction)}</b> · 경로 점수 <b>${data.route_score}</b> · 관심사 충족 <b>${data.interest_satisfaction}%</b>`}</p>
       ${list('추천 이유', data.reasons || [])}
       ${list('주의사항', data.cautions || [])}
       ${list('대체 장소', data.alternatives || [])}
-      <p>데이터 신뢰도: ${Math.round((data.data_confidence || 0) * 100)}%</p>`;
+      <p>데이터 신뢰도: ${data.verification_status === 'unverified' ? '확인 필요' : Math.round((data.data_confidence || 0) * 100) + '%'}</p>`;
   }
 
-  global.SeoulRouteView = { render, renderReport };
+  global.SeoulRouteView = { render, renderReport, recommendationList, venuePhone, venueDetails };
 })(window);

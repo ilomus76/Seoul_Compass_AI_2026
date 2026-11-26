@@ -350,12 +350,14 @@
       const nodes = [];
       while (walker.nextNode()) nodes.push(walker.currentNode);
       nodes.forEach((node) => {
+        if (node.parentElement && node.parentElement.closest('[translate="no"]')) return;
         const next = translateText(node.nodeValue);
         if (next !== node.nodeValue) node.nodeValue = next;
       });
       const all = scope.querySelectorAll ? Array.from(scope.querySelectorAll('*')) : [];
       if (scope.nodeType === 1) all.unshift(scope);
       all.forEach((el) => {
+        if (el.closest('[translate="no"]')) return;
         ['placeholder', 'title', 'aria-label'].forEach((attr) => {
           const value = el.getAttribute(attr);
           if (value) {

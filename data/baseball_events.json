@@ -1,0 +1,20 @@
+[
+  {
+    "name": "한일 드림 플레이어즈 게임 2026 전야제",
+    "kind": "baseball_event",
+    "date": "2026-12-04",
+    "start_time": "18:30",
+    "venue": "고척스카이돔",
+    "address": "서울 구로구 경인로 430",
+    "source_url": "https://dreamplayers.kr/"
+  },
+  {
+    "name": "한일 드림 플레이어즈 게임 2026 본경기",
+    "kind": "baseball_game",
+    "date": "2026-12-05",
+    "start_time": "14:00",
+    "venue": "고척스카이돔",
+    "address": "서울 구로구 경인로 430",
+    "source_url": "https://dreamplayers.kr/"
+  }
+]

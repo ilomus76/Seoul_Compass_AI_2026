@@ -5,13 +5,16 @@ LLM API 키가 없어도 동작하며, 실제 LLM 연결 시 이 모듈만 교�
 """
 import re
 from typing import Dict, List
+from datetime import datetime, timedelta, timezone
+from .location_context import context_names, normalize_request_text
 
 # 키워드 → 활동 카테고리 매핑 (확장 가능한 구조)
 KEYWORD_RULES = [
     ("hiking", ["등산", "산행", "관악산", "북한산", "등산로", "hiking", "trail", "登山", "ハイキング", "爬山"]),
     ("shower", ["샤워", "목욕", "찜질방", "shower", "bath", "シャワー", "淋浴"]),
+    ("swimming", ["수영", "수영장", "swimming", "swim", "水泳", "游泳"]),
     ("meeting", ["만나", "약속", "미팅", "meeting", "meet", "appointment", "待ち合わせ", "见面", "會面"]),
-    ("restaurant", ["고등어", "회", "술", "식사", "먹", "맛집", "restaurant", "food", "mackerel",
+    ("restaurant", ["순대국", "순댓국", "고등어", "회", "술", "식사", "먹", "맛집", "restaurant", "food", "mackerel",
                     "sushi", "drink", "食事", "レストラン", "吃饭"]),
     ("bowling", ["볼링", "bowling", "ボウリング", "保龄球"]),
     ("international_tourism_area", ["외국인", "국제", "이태원", "관광객", "foreigner",
@@ -21,7 +24,8 @@ KEYWORD_RULES = [
     ("shopping", ["쇼핑", "명동", "백화점", "shopping", "shop", "myeongdong", "買い物", "购物"]),
     ("cafe", ["카페", "커피", "cafe", "coffee", "カフェ", "咖啡"]),
     ("night_view", ["야경", "전망", "night view", "night", "view", "夜景"]),
-    ("culture", ["박물관", "미술관", "궁궐", "한옥", "museum", "palace", "博物館", "博物馆"]),
+    ("culture", ["박물관", "미술관", "한옥", "museum", "博物館", "博物馆"]),
+    ("palace", ["고궁", "궁궐", "경복궁", "창덕궁", "창경궁", "덕수궁", "경희궁", "palace"]),
     ("park", ["공원", "한강", "산책", "park", "han river", "公園", "公园"]),
 ]
 
@@ -43,7 +47,7 @@ def extract_times(text: str) -> List[Dict]:
             hour += 12
         # 12시는 정오로 처리 (상속된 오전 접두어로 자정이 되지 않게)
         found.append({"time": f"{hour:02d}:{int(minute) if minute else 0:02d}",
-                      "position": m.start(), "raw": m.group(0).strip()})
+                      "position": m.start(), "end": m.end(), "raw": m.group(0).strip()})
 
     # 영어: 9am / 2 pm / 14:00
     for m in re.finditer(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", text, re.I):
@@ -109,18 +113,18 @@ SYNONYMS = {
 
 def parse_date(text: str) -> str | None:
     """질문에서 여행 날짜를 YYYY-MM-DD로 추출한다."""
-    from datetime import date, timedelta
+    today = datetime.now(timezone(timedelta(hours=9))).date()
     m = re.search(r"(20\d\d)[년\-/\.]\s*(\d{1,2})[월\-/\.]\s*(\d{1,2})", text)
     if m:
         return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
     m = re.search(r"(?<!\d)(\d{1,2})월\s*(\d{1,2})일", text)
     if m:
-        return f"{date.today().year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+        return f"{today.year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
     lower = text.lower()
     if "오늘" in text or "today" in lower:
-        return date.today().isoformat()
+        return today.isoformat()
     if "내일" in text or "tomorrow" in lower:
-        return (date.today() + timedelta(days=1)).isoformat()
+        return (today + timedelta(days=1)).isoformat()
     return None
 
 
@@ -183,23 +187,47 @@ def chunk_text(text: str) -> List[Dict]:
 
 def parse_user_request(text: str) -> Dict:
     """질문을 AGENTS.md 4.2 형태의 구조화된 dict로 변환한다."""
+    original_text = text
+    text = normalize_request_text(text)
+    location_context = context_names(text)
     times = extract_times(text)
     chunks = chunk_text(text)
     fixed_categories = {"hiking", "meeting", "bowling", "subway_station"}
     candidates = []
+    market_meal = re.search(r'시장(?:에서|에|의)?[^.!?]{0,35}(?:음식|먹거리|먹|식사|맛있[는은])', text)
 
     for category, keywords in KEYWORD_RULES:
-        positions = [text.lower().find(k.lower()) for k in keywords if k.lower() in text.lower()]
-        if not positions:
+        matches = [(k, m.start()) for k in keywords for m in re.finditer(re.escape(k), text, re.I)]
+        if category == 'restaurant' and market_meal:
+            matches = [(k, pos) for k, pos in matches
+                       if not market_meal.start() <= pos < market_meal.end()]
+        if not matches:
             continue
-        matched = next(k for k in keywords if k.lower() in text.lower())
-        candidates.append({"category": category, "position": min(positions), "matched": matched,
-                           "keywords": [k for k in keywords if k.lower() in text.lower()]})
+        # 검색 기준으로만 언급한 산을 실제 등산 일정으로 추가하지 않는다.
+        if category == 'hiking' and re.search(r'(?:기준|중심|주변|근처|근방|인근)', text):
+            actions = ['등산', '산행', '오르', '오를', '올라', '올랐', 'hiking', 'trail', '登山', 'ハイキング', '爬山']
+            if not any(word in text.lower() for word in actions):
+                continue
+        terms = list(dict.fromkeys(k for k, _ in matches))
+        if category == 'culture' and '박물관' in terms and '역사' in text:
+            museum_position = next(pos for term, pos in matches if term == '박물관')
+            candidates.append({'category': 'history_museum', 'position': museum_position,
+                               'matched': '박물관', 'keywords': ['박물관']})
+        else:
+            candidates.append({"category": category, "position": min(pos for _, pos in matches),
+                               "matched": terms[0], "keywords": terms})
+    if market_meal:
+        candidates.append({'category': 'market_food', 'position': market_meal.start(),
+                           'matched': '시장', 'keywords': ['시장']})
+    if location_context['implicit_hiking'] and not any(c['category'] == 'hiking' for c in candidates):
+        mountain = location_context['mountain_name']
+        candidates.append({'category': 'hiking', 'position': text.index(mountain),
+                           'matched': mountain, 'keywords': [mountain, '등산'], 'inferred': True})
     # 사용자가 말한 순서를 유지한다.
     candidates.sort(key=lambda c: c["position"])
 
     activities = []
-    for item in candidates:
+    for item_index, item in enumerate(candidates):
         category, position = item["category"], item["position"]
         before = [t for t in times if t["position"] < position]
         after = [t for t in times if t["position"] >= position]
@@ -236,10 +264,93 @@ def parse_user_request(text: str) -> Dict:
         else:
             activity["place"] = None
         activity["keywords"] = canonical_keywords(activity["keywords"], category)
+        activity['duration_estimated'] = True
+        # 시각은 해당 활동 앞의 구간에서만 연결한다. 앞 활동 시각을 뒤에 복사하지 않는다.
+        previous_position = candidates[item_index - 1]['position'] if item_index else -1
+        local_times = [t for t in times if previous_position < t['position'] < position]
+        local_time = local_times[-1]['time'] if local_times else None
+        if category == 'swimming':
+            activity['duration_minutes'] = 90  # 수영·환복을 포함한 수정 가능한 추정값
+            activity['preferred_time'] = None
+            if local_time:
+                between = text[local_times[-1]['position']:position]
+                if re.search(r'내려|하산|이후|후에', between):
+                    activity['earliest_start'] = local_time
+                else:
+                    activity['start_time'] = local_time
+                    activity['fixed_time'] = True
+        if category == 'restaurant':
+            menu = ['순대국'] if re.search(r'순대국|순댓국', text) else []
+            activity['required_keywords'] = menu
+            if menu and local_time:
+                activity['preferred_time'] = None
+                activity['start_time'] = local_time
+                activity['fixed_time'] = not bool(re.search(r'(?:시|분)\s*(?:쯤|경|무렵)',
+                                                          text[local_times[-1]['position']:position]))
+                if not activity['fixed_time']:
+                    activity['preferred_time'] = local_time
+                    activity['start_time'] = None
+        if category == 'history_museum':
+            limit = candidates[item_index + 1]['position'] if item_index + 1 < len(candidates) else len(text)
+            # “12시에 박물관에서 나와서”는 방문 시작 시각이 아니라 종료 시각이다.
+            exit_time = next((t for t in times if position < t['position'] < limit
+                              and re.match(r'\s*에?\s*(?:박물관에서\s*)?(?:나와|나오|나올|나온)',
+                                           text[t.get('end', t['position'] + len(t.get('raw', t['time']))):])), None)
+            after_visit = [t for t in after if t['position'] < (exit_time or {}).get('position', limit)]
+            start = local_time or (after_visit[0]['time'] if after_visit else None)
+            activity.update(start_time=start, preferred_time=None, fixed_time=start is not None)
+            if exit_time:
+                activity['end_time'] = exit_time['time']
+                if start:
+                    hour, minute = map(int, start.split(':'))
+                    end_hour, end_minute = map(int, exit_time['time'].split(':'))
+                    activity['duration_minutes'] = max(0, end_hour * 60 + end_minute - hour * 60 - minute)
+                    activity['duration_estimated'] = False
+        if category in ('palace', 'market_food'):
+            activity.update(earliest_start=local_time, preferred_time=None)
+        if category == 'palace':
+            named_palaces = [term for term in item['keywords'] if term not in ('고궁', '궁궐', 'palace')]
+            if len(named_palaces) == 1:
+                activity['required_keywords'] = named_palaces
+        if category == 'hiking':
+            next_position = candidates[item_index + 1]['position'] if item_index + 1 < len(candidates) else len(text)
+            descent = re.search(r'(\d{1,2})\s*(?::(\d{2})|시)(?:에|쯤|경)?\s*(?:내려|하산)', text[position:next_position])
+            if descent and activity.get('start_time'):
+                end_time = f"{int(descent.group(1)):02d}:{int(descent.group(2) or 0):02d}"
+                start_minutes = sum(int(v) * k for v, k in zip(activity['start_time'].split(':'), (60, 1)))
+                end_minutes = int(descent.group(1)) * 60 + int(descent.group(2) or 0)
+                activity['end_time'] = end_time
+                activity['duration_minutes'] = max(0, end_minutes - start_minutes)
+                activity['duration_estimated'] = False
+                activity['duration_source'] = '사용자가 지정한 산행 시간창'
+        # 검색 시 정규화한 키워드와 별도로, 화면에는 입력 문장의 원래 표현을 보존한다.
+        display_terms = list(item['keywords'])
+        if category == 'shopping' and '백화점' in display_terms:
+            display_terms.insert(0, '백화점')
+        if activity.get('fixed_location') and activity.get('location'):
+            display_terms.insert(0, activity['location'])
+        activity['request_term'] = next(
+            (match.group() for term in display_terms
+             if (match := re.search(re.escape(term), original_text, re.I))), None)
         activities.append(activity)
 
     travel_date = parse_date(text)
     warnings = []
+    explicit_date = re.search(r'\d{1,2}월\s*\d{1,2}일|20\d{2}[./-]\d{1,2}[./-]\d{1,2}', text)
+    if explicit_date and '내일' in text and travel_date != parse_date('내일'):
+        warnings.append(f'“내일”과 명시한 날짜가 다릅니다. {travel_date}에 맞춰 분석했습니다.')
+    if text != original_text:
+        warnings.append('출발 문맥의 “발해서” 표현을 “출발해서”로 보정했습니다.')
+    departure_match = re.search(r'출발', text)
+    departure_time = None
+    if (departure_match and location_context['uses_current_location'] and times
+            and times[0]['position'] < departure_match.start()
+            and not re.search(r'등산|산행|오르|올라', text[:departure_match.start()])):
+        departure_time = times[0]['time']
+        if activities and activities[0]['category'] == 'hiking':
+            activities[0].update(start_time=None, fixed_time=False, duration_minutes=None,
+                                 duration_estimated=True, duration_source='출발 후 이동을 제외한 산행 가능 시간 확인 필요')
+        warnings.append(f'{departure_time}는 현재 위치에서 출발하는 시각으로 해석했습니다. 등산 시작 시각은 이동 후 계산합니다.')
     if travel_date is None:
         warnings.append("여행 날짜가 지정되지 않아 날짜 정보는 null입니다.")
     if not any(k in text.lower() for k in ["집으로", "귀가", "집에", "go home", "帰宅", "回家"]):
@@ -262,6 +373,10 @@ def parse_user_request(text: str) -> Dict:
     return {
         "start_location": {"type": "current_location", "latitude": None, "longitude": None},
         "travel_date": travel_date,
+        "departure_time": departure_time,
+        "region_scope": '서울' if re.search(
+            r'서울(?:특별시)?(?:에\s*(?:있는|가|갈)|을\s*(?:가|갈)|로\s*(?:가|갈|여행)|에서\s*(?!\s*출발)(?:역사|박물관|고궁|여행|관광|구경)|의\s*산|\s*(?:안|내|지역))|서울.*(?:산|지역).*추천',
+            text) else None,
         "budget_krw": (
             int(_bm.group(1)) * 10000 if _bm.group(2) else
             (int(_bm.group(3)) if _bm.group(3) else int(_bm.group(1)))
