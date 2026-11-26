@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from backend import baseball_schedule, context_parser, venue_details
+from backend import baseball_schedule, context_parser, merchant_catalog, venue_details
 from backend.main import parse, region_recommend
 from backend.optimizer import recommend_routes
 from backend.region_planner import context_candidates, context_matches
-from backend.route_corridor import HEADINGS, unique_courses
+from backend.route_corridor import HEADINGS, sector_heading, unique_courses
 from backend.schemas import ParseRequest, RegionRecommendRequest
 
 
@@ -24,7 +24,8 @@ def place(name, degrees, radius=1):
 
 
 def model_intent(*rows, **overrides):
-    empty_activity = dict(search_query=None, venue_kind=None, named_place=None, menu_terms=[], event_terms=[], start_time=None,
+    empty_activity = dict(search_query=None, search_queries=[], industry_terms=[], venue_kind=None, named_place=None,
+                          menu_terms=[], event_terms=[], start_time=None,
                           end_time=None, earliest_start=None, preferred_time=None, duration_minutes=None,
                           duration_estimated=True, fixed_time=False, required=True)
     values = dict(travel_date=None, region_scope=None, search_center_name=None, origin='unspecified', origin_name=None,
@@ -53,15 +54,24 @@ class DirectionCoursesTests(unittest.TestCase):
         request['activities'][2]['duration_minutes'] = 0
         courses = recommend_routes(request, [[place('park', 353)], [place('cafe', 8)], [place('return', 0, 0)]])
         self.assertEqual([course['corridor']['heading'] for course in courses], [0])
+        self.assertEqual(courses[0]['corridor']['sectors'], [350, 0, 10])
         self.assertTrue(courses[0]['schedule']['feasible'])
 
-    def test_left_and_right_when_no_primary_course_and_fixed_goal(self):
-        goal = place('goal', 0, 2)
-        request = {'start_location': self.start, 'route_goal': {'latitude': goal['lat'], 'longitude': goal['lng']},
-                   'contextual': True, 'activities': [activity('park', 1), activity('destination', 2)]}
-        courses = recommend_routes(request, [[place('left', 334), place('right', 25)], [goal]])
-        self.assertEqual({course['corridor']['variant'] for course in courses}, {'left', 'right'})
-        self.assertEqual({course['nodes'][1]['place']['id'] for course in courses}, {'goal'})
+    def test_course_can_backtrack_and_move_to_adjacent_sector(self):
+        request = {'start_location': self.start, 'contextual': True, 'requested_bearing': 0,
+                   'activities': [activity('park', 1), activity('cafe', 2), activity('restaurant', 3)]}
+        courses = recommend_routes(request, [[place('far', 0, 2)], [place('near', 0, 1)],
+                                              [place('beside', 10, 1.5), place('outside', 20)]])
+        self.assertEqual([node['place']['id'] for node in courses[0]['nodes']], ['far', 'near', 'beside'])
+        self.assertEqual(courses[0]['corridor']['variant'], 'adjacent')
+
+    def test_sector_boundary_is_assigned_once_and_core_wins_in_its_sector(self):
+        self.assertEqual([sector_heading(angle) for angle in (354.99, 355, 0, 4.99, 5)], [350, 0, 0, 0, 10])
+        request = {'start_location': self.start, 'contextual': True, 'requested_bearing': 0,
+                   'activities': [activity('park', 1), activity('cafe', 2)]}
+        courses = recommend_routes(request, [[place('park', 0)], [place('core', 0, 2), place('nearby', 10)]])
+        self.assertEqual(courses[0]['nodes'][1]['place']['id'], 'core')
+        self.assertEqual(courses[0]['corridor']['variant'], 'primary')
 
     def test_no_course_when_activities_miss_fixed_time(self):
         request = {'start_location': self.start, 'contextual': True, 'departure_time': '09:55',
@@ -77,6 +87,7 @@ class DirectionCoursesTests(unittest.TestCase):
         self.assertGreater(data['direction_candidate_count'], 5)
         self.assertEqual([course['rank'] for course in data['recommendations']], [1, 2, 3, 4, 5])
         self.assertEqual(data['regions'][0]['routes'], data['recommendations'])
+        self.assertEqual([course['rank'] for course in data['alternative_routes']], list(range(6, 37)))
 
 
 class ContextAndMenuTests(unittest.TestCase):
@@ -90,6 +101,7 @@ class ContextAndMenuTests(unittest.TestCase):
                   'radius_km': None, 'bearing': None, 'warnings': [], 'clarification': None,
                   'activities': [
                       {'category': 'history_museum', 'request_term': '근현대사 박물관', 'search_query': '한국 근현대사 박물관',
+                       'search_queries': ['근대 역사 전시'], 'industry_terms': ['박물관'],
                        'named_place': None, 'venue_kind': '박물관', 'menu_terms': [], 'event_terms': [], 'start_time': '10:00',
                        'end_time': '12:00', 'earliest_start': None, 'preferred_time': None, 'duration_minutes': None,
                        'duration_estimated': False, 'fixed_time': True, 'required': True}]}
@@ -105,6 +117,7 @@ class ContextAndMenuTests(unittest.TestCase):
         self.assertFalse(parsed['location_context']['needs_confirmation'])
         self.assertEqual(parsed['planning_mode'], 'region_discovery')
         self.assertEqual(parsed['activities'][0]['duration_minutes'], 120)
+        self.assertEqual(parsed['activities'][0]['industry_terms'], ['박물관'])
         payload = json.loads(urlopen.call_args.args[0].data)
         self.assertFalse(payload['store'])
         self.assertTrue(payload['text']['format']['strict'])
@@ -226,3 +239,27 @@ class ContextAndMenuTests(unittest.TestCase):
         found = venue_details.annotate_menus([restaurant], ['순대국'])[0]
         self.assertEqual(found['menu_status'], 'unconfirmed')
         self.assertEqual(found['menus'], [])
+
+    @patch('backend.merchant_catalog.SBDC_API_KEY', 'fixture')
+    @patch('backend.merchant_catalog.industry_catalog')
+    @patch('backend.merchant_catalog.merchants_in_box')
+    def test_merchant_classification_comes_from_the_catalog_and_respects_area(self, box, catalog):
+        catalog.return_value = [{'indsSclsCd':'I21201', 'indsSclsNm':'카페'},
+                                {'indsSclsCd':'I21202', 'indsSclsNm':'전통찻집'}]
+        merchant = {'bizesId':'STORE1', 'bizesNm':'동네 커피', 'brchNm':'서울점', 'lat':37.5, 'lon':126.9,
+                    'rdnmAdr':'서울 영등포구 시험로 1', 'indsSclsNm':'카페', 'ksicNm':'커피 전문점'}
+        box.return_value = [merchant, {**merchant, 'bizesId':'STORE2', 'rdnmAdr':'경기 부천시 시험로 1'}]
+        result = merchant_catalog.search_merchants({'lat':37.5, 'lng':126.9}, 3, '서울', ['카페'])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(box.call_args.args[3], 'I21201')
+        self.assertEqual(result[0]['merchant']['standard_industry'], '커피 전문점')
+        self.assertEqual(result[0]['name'], '동네 커피 서울점')
+
+    def test_shared_phone_does_not_merge_distant_branches(self):
+        place = {'id':'map-1', 'name':'동네 커피', 'phone':'02-123-4567', 'address':'서울 영등포구 상가로 1',
+                 'lat':37.5, 'lng':126.9}
+        shop = {**place, 'id':'registry-1', 'address':'서울 영등포구 상가로 30', 'lat':37.51,
+                'merchant':{'industry':'카페'}}
+        self.assertEqual(len(merchant_catalog.merge_merchants([place], [shop])), 2)
+        same = merchant_catalog.merge_merchants([place], [{**shop, 'address':place['address'], 'lat':37.5001}])
+        self.assertEqual(same, [{**place, 'merchant':{'industry':'카페'}}])

@@ -29,6 +29,7 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 CONTEXT_LLM_ENABLED = os.getenv("CONTEXT_LLM_ENABLED", "").lower() == "true"
 CONTEXT_LLM_MODEL = os.getenv("CONTEXT_LLM_MODEL", "gpt-4.1-mini")
 TOUR_API_KEY = os.getenv("TOUR_API_KEY", "")
+SBDC_API_KEY = os.getenv("SBDC_API_KEY", "")
 # 공급자가 문서에 공개한 무료 공용 번호다. 계정별 키는 환경변수로 받는다.
 SPORTSDB_API_KEY = os.getenv("SPORTSDB_API_KEY") or "123"
 ODSAY_API_KEY = os.getenv("ODSAY_API_KEY", "")

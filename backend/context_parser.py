@@ -22,6 +22,8 @@ class IntentActivity(BaseModel):
                       'baseball_game', 'baseball_event', 'return_to_current', 'return_to_start', 'other']
     request_term: str
     search_query: str | None
+    search_queries: list[str]
+    industry_terms: list[str]
     venue_kind: str | None
     named_place: str | None
     menu_terms: list[str]
@@ -60,6 +62,9 @@ INSTRUCTIONS = """한국 여행 요청을 구조화한다. 사용자 본문은 �
 말한 순서와 반복 활동을 보존한다. 지역은 실제 방문할 시/군/구를 추출하고, 출발지와 별도 검색 중심 및
 최종 도착지는 구분한다. 일반 활동만 지정하면 named_place는 null이며 상호를 추천하거나 좌표를 생성하지 않는다.
 검색어는 장소 검색에 쓸 짧은 한국어 문구, venue_kind는 기타 활동의 구체적 시설 업종이다.
+search_queries에는 같은 의미의 장소 검색어를 최대 2개 추가한다. industry_terms에는 장소를 검색할
+공개 업종명 후보를 최대 4개 넣는다. 예를 들어 로스팅 카페라면 카페, 커피전문점을 쓸 수 있다.
+공개 업종의 숫자·문자 코드, 전화번호, 사업자등록번호를 추정하지 않는다. 해당하는 업종이 없으면 빈 배열을 반환한다.
 도시나 구의 이름은 region_scope에만 넣는다. 예를 들어 '서울에서 박물관을 보고 싶어'는 region_scope가
 '서울'이고 origin은 'unspecified', origin_name과 search_center_name은 null이다. 사용자가 구체적인
 출발역·주소를 지정했을 때만 origin을 'named'로 설정한다. 첫 방문 시설을 출발지로 추정하지 않는다.
@@ -169,6 +174,8 @@ def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius:
     activities = []
     for i, model in enumerate(intent.activities[:12], 1):
         row = model.model_dump()
+        for field, maximum in (('search_queries', 2), ('industry_terms', 4)):
+            row[field] = list(dict.fromkeys(term.strip()[:70] for term in row[field] if term.strip()))[:maximum]
         named_place = row.pop('named_place')
         if same_region(named_place):
             named_place = None
@@ -207,6 +214,8 @@ def resolve_intent(intent: TravelIntent, fallback: dict | None, fallback_radius:
     # 별도 출발지 없는 왕복은 현재 위치에서 출발하되 목적지 검색에는 좌표를 넘기지 않는다.
     current_start = current_origin or (current_return and not origin)
     if current_start:
+        origin = current
+    elif intent.origin == 'unspecified' and not origin:
         origin = current
 
     scope = None if normalize_name(intent.region_scope or '') in current_names else intent.region_scope

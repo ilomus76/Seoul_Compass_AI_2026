@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>다른 코스와 장소 · Seoul Compass AI</title>
+  <link rel="stylesheet" href="/css/style.css?v=39">
+</head>
+<body data-theme="light" class="alternative-page">
+  <main class="alternative-content">
+    <a id="backToPlan" href="/">← 추천 화면</a>
+    <h1>다른 코스와 장소</h1>
+    <p id="emptyState" hidden>같은 탭에서 일정을 분석하면 추가 코스와 장소가 여기에 표시됩니다.</p>
+    <section id="otherRoutes" hidden>
+      <h2>추가 코스</h2>
+      <p class="hint">시간과 이동 거리는 추정값입니다.</p>
+      <div id="additionalRoutes" class="alternative-list"></div>
+    </section>
+    <section id="otherPlaces" hidden>
+      <h2>추천에 포함되지 않은 장소</h2>
+      <div id="additionalPlaces" class="alternative-list"></div>
+    </section>
+  </main>
+  <script src="/js/alternatives.js?v=39"></script>
+</body>
+</html>

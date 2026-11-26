@@ -7,6 +7,24 @@ const {join} = require('node:path');
 const context = {window:{}};
 runInNewContext(readFileSync(join(__dirname, '../frontend/js/journey.js'), 'utf8'), context);
 const J = context.window.SeoulJourney;
+
+test('추가 코스 페이지는 6위 코스와 별도 장소 목록을 같은 세션에서 표시한다', () => {
+  const node = () => ({children:[], appendChild(child) { this.children.push(child); }, addEventListener() {}});
+  const elements = new Map();
+  const document = {getElementById(id) {
+    if (!elements.has(id)) elements.set(id, node());
+    return elements.get(id);
+  }, createElement:node};
+  const data = {routes:[{rank:6,corridor:{heading:0,variant:'adjacent'},distance:1.2,minutes:25,
+    stops:[{time:'10:00',name:'시험 카페',term:'커피'}]}],
+  places:[{label:'커피',items:[{name:'다른 카페',industry:'카페',url:'https://example.com'}]}]};
+  const source = readFileSync(join(__dirname, '../frontend/js/alternatives.js'), 'utf8');
+  runInNewContext(source, {document, sessionStorage:{getItem:() => JSON.stringify(data)}});
+  assert.equal(elements.get('emptyState').hidden, true);
+  assert.match(elements.get('additionalRoutes').children[0].children[0].textContent, /추천 6.*양옆/);
+  assert.equal(elements.get('additionalPlaces').children[0].children[1].children[0].children[0].href,
+    'https://example.com');
+});
 const a = {id:'a', name:'시험 산', category:'hiking', lat:37.45, lng:126.78};
 const b = {id:'b', name:'시험 수영장', category:'swimming', lat:37.46, lng:126.79};
 const c = {id:'c', name:'시험 식당', category:'restaurant', lat:37.47, lng:126.80};

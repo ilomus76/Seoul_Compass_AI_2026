@@ -85,7 +85,18 @@ Seoul_Compass_AI_2026/
 - 공공데이터포털의 [한국관광공사_국문 관광정보 서비스_GW (`KorService2`)](https://www.data.go.kr/data/15101578/openapi.do)에서 활용신청을 합니다. 승인 후 상세 화면에서 `일반 인증키(Decoding)` 값을 복사해 프로젝트 루트의 `.env`에 `TOUR_API_KEY=발급받은_인증키`로 설정하고 서버를 재시작합니다. 키는 `.env.example`이나 GitHub에 넣지 않습니다.
 - 이 키로 같은 시설로 확인된 음식점의 공개 메뉴를 표시합니다. 메뉴 데이터가 없는 곳은 장소 링크와 공개 전화번호로 확인할 수 있습니다.
 - KBO 경기는 TheSportsDB 무료 일정 API에서 조회합니다. 별도 계정 키를 사용하려면 `.env`의 `SPORTSDB_API_KEY`에 설정합니다. 요청 날짜의 경기가 확인되지 않으면 KBO 또는 대회 주최 측 공식 홈페이지 링크를 제공합니다.
-- 문맥 분석 모드에서는 10° 간격의 36방향을 비교하고, 각 방향의 좌우 10° 안에서 시간 순서에 맞는 활동 군집을 연결합니다. 전체 상위 5개를 지도에 다른 색으로 표시합니다. 자세한 기준은 [지도·장소 검색·길찾기 요구사항](docs/map-routing.md#44-문맥-분석의-36방향-스캔과-대안-코스)을 참고하세요.
+- 폭 10°의 구역 36개에서 활동 군집을 시간 순서대로 연결합니다. 단일 구역에서 코스가 성립하지 않으면 양옆 10° 구역을 함께 조회합니다. 상위 5개는 지도에서, 추가 코스와 나머지 장소는 `/alternatives`에서 확인합니다. [지도·장소 검색·길찾기 요구사항](docs/map-routing.md#44-문맥-분석의-36방향-스캔과-대안-코스)
+
+### 필요한 API와 추가 데이터
+
+| 역할 | 서비스 | 설정과 적용 범위 |
+|---|---|---|
+| 문맥 분석 | OpenAI Responses API | `LLM_API_KEY`, `CONTEXT_LLM_ENABLED=true`. 활동·시간·검색어·업종명 후보를 해석합니다. |
+| 장소 검색과 지도 | [카카오 Local](https://developers.kakao.com/docs/ko/local/dev-guide) | `KAKAO_REST_API_KEY`, 지도 SDK는 `KAKAO_JAVASCRIPT_KEY`. 실제 주소·좌표·공개 번호·카테고리를 조회합니다. |
+| 공공 상가 업종 | [소상공인시장진흥공단 상가(상권)정보 API](https://www.data.go.kr/data/15012005/openapi.do) | 무료 활용신청 후 프로젝트 `.env`에 `SBDC_API_KEY`로 등록하고 재시작합니다. 상가업소번호·상권업종·표준산업분류·주소·좌표를 사용합니다. |
+| 공개 메뉴와 관람 일정 | [TourAPI](https://www.data.go.kr/data/15101578/openapi.do), [TheSportsDB](https://api.thesportsdb.com/documentation) | 관광공사 메뉴는 `TOUR_API_KEY`, KBO 일정은 공개 무료 API를 사용합니다. |
+| 추가 영업 상태 데이터 | [일반음식점 인허가 공개 데이터](https://www.data.go.kr/data/15096283/standard.do), [국세청 사업자등록 상태조회](https://www.data.go.kr/data/15081808/openapi.do) | 후속 연동 대상입니다. 국세청 서비스는 확인할 사업자등록번호가 필요하며, 매장 탐색에는 위 상권정보 API를 사용합니다. |
+| 실제 교통 경로 | [OSRM](https://routing.openstreetmap.de/about.html), [ODsay](https://lab.odsay.com/) | 도로 및 철도 선형 조회에 사용합니다. 철도에는 `ODSAY_API_KEY`가 필요합니다. |
 
 ## API
 

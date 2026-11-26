@@ -55,8 +55,9 @@
 ## 문맥 분석과 36방향 코스 추천
 
 - `/api/parse`의 선택 필드 `analysis_mode`는 `context`, `legacy`입니다. 생략하면 서버 활성화 설정을 따릅니다. 응답의 `analysis_method`로 실제 실행 모드를 확인합니다. 문맥 분석이 요청됐으나 사용할 수 없으면 HTTP 503 안내를 반환합니다.
-- 문맥 분석 응답은 `requested_bearing`, `route_goal`과 활동별 `search_query`, `venue_kind`, `menu_terms`를 제공합니다. 분석의 `location_context.needs_confirmation`이 true면 검색에 앞서 `error`를 표시합니다.
-- `/api/regions/recommend`에 `contextual: true`, `requested_bearing`, `route_goal`을 전달하면 전체 `recommendations`를 최대 5개 반환합니다. `scanned_headings`는 기준 방향 수 36, `direction_candidate_count`는 중복을 제거한 순위 적용 전 건수입니다. 각 코스의 `rank`, `region_id`, `start_location`, `corridor.heading`, `corridor.variant`(`primary`, `left`, `right`)를 제공합니다. 방향과 시간이 함께 맞지 않는 지역에는 `no_corridor`를 표시합니다.
+- 문맥 분석 응답은 `requested_bearing`, `route_goal`과 활동별 `search_query`, `search_queries`, `industry_terms`, `venue_kind`, `menu_terms`를 제공합니다. 분석의 `location_context.needs_confirmation`이 true면 검색에 앞서 `error`를 표시합니다.
+- `/api/regions/recommend`에 `contextual: true`, `requested_bearing`, `route_goal`을 전달하면 전체 `recommendations`를 최대 5개 반환합니다. `alternative_routes`에는 다음 순위 코스를 제공합니다. `scanned_headings`는 전체 방향 36 또는 지정 방향 1, `direction_candidate_count`는 중복 제거 후 전체 수입니다. `corridor.variant`는 `primary` 또는 `adjacent`, `corridor.sectors`는 사용한 10° 구역 목록입니다. 방향과 시간이 함께 맞지 않는 지역에는 `no_corridor`를 표시합니다.
+- `merchant_lookup`으로 상권정보 연동 상태를 표시합니다. `matched`는 공공 업종 데이터 포함, `unconfigured`는 키 미설정, `unconfirmed`는 공개 업종 미확인입니다. 상권정보 업체의 `merchant`에는 공공 상가업소 식별자와 상권·표준산업 분류가 있습니다.
 - 음식점 후보의 `menus`, `menu_source`, `matched_menu_terms`, `menu_status`로 공개 메뉴와 확인 상태를 구별합니다. `matched`는 요청 메뉴가 공개 정보에서 확인된 경우, `unconfirmed`는 요청 메뉴 확인 필요, `published`는 공개 메뉴 있음, `unavailable`은 공개 메뉴 미확인입니다.
 
 ## 야구 일정 조회와 홈페이지 안내

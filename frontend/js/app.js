@@ -748,6 +748,49 @@
     SeoulRouteView.render($('routeList'), state.routes, selectGlobalRecommendation);
   }
 
+  function storeAdditionalCourses(result) {
+    const link = $('additionalCoursesLink');
+    link.hidden = true;
+    try {
+      const key = 'seoul-compass-additional-courses';
+      sessionStorage.removeItem(key);
+      if (!result) return;
+      const viewing = (result.recommendations || []).flatMap(route => route.nodes.map(node => node.place.id));
+      const included = new Set(viewing);
+      const publicPlace = place => ({
+        name: place.name, industry: place.merchant?.industry || place.provider_category,
+        url: place.place_url
+      });
+      const otherPlaces = new Map();
+      for (const region of result.regions || []) {
+        for (const group of region.candidate_groups || []) {
+          const activity = state.parsed.activities.find(item => item.id === group.activity_id);
+          const label = activity?.request_term || activityNames[group.category] || group.category;
+          const groupPlaces = otherPlaces.get(label) || new Map();
+          for (const place of group.places) {
+            if (place.source !== 'user' && !included.has(place.id)) groupPlaces.set(place.id, publicPlace(place));
+          }
+          if (groupPlaces.size) otherPlaces.set(label, groupPlaces);
+        }
+      }
+      const routes = (result.alternative_routes || []).map(route => ({
+        rank: route.rank, corridor: route.corridor, distance: route.total_distance_km, minutes: route.total_travel_minutes,
+        stops: route.nodes.map((node, i) => ({
+          name: node.place.source === 'user' ? '복귀 지점' : node.place.name,
+          term: node.place.source === 'user' ? null : node.request_term,
+          time: route.schedule?.timeline?.[i]?.estimated_start
+        }))
+      }));
+      const places = [...otherPlaces].map(([label, items]) => ({label, items:[...items.values()]}));
+      if (routes.length || places.length) {
+        sessionStorage.setItem(key, JSON.stringify({routes, places}));
+        link.hidden = false;
+      }
+    } catch {
+      // 브라우저가 세션 저장을 막으면 이전 분석의 링크를 노출하지 않는다.
+    }
+  }
+
   function selectGlobalRecommendation(route) {
     const regionIndex = route?.region_id && state.regions.findIndex(region => region.id === route.region_id);
     if (Number.isInteger(regionIndex) && regionIndex >= 0 && state.regions[regionIndex] !== state.selectedRegion) {
@@ -894,6 +937,7 @@
       renderParsedPlan();
       const context = state.parsed.location_context || {};
       state.regions = []; state.selectedRegion = null; state.directionalResult = null;
+      storeAdditionalCourses(null);
       state.planEdited = false; $('regionPanel').hidden = true;
       state.previewRoute = null;
       $('recommendationPanel').hidden = true;
@@ -921,6 +965,7 @@
           transport_modes: cfg.modes
         });
         state.regions = result.regions || [];
+        storeAdditionalCourses(result);
         if (result.recommendations) {
           // JSON에서 지역별·전체 목록은 별도 객체이므로 지도와 선택 목록은 같은 객체를 참조한다.
           state.directionalResult = result;
@@ -930,7 +975,9 @@
             if (region.draft_route) region.draft_route = recommendationsByRank.get(region.draft_route.rank);
           });
         }
-        $('regionNote').textContent = [result.note, ...(result.warnings || [])].join(' ');
+        const sourceStatus = {matched:'상권 업종 데이터 포함', unconfigured:'상권정보 키 미설정 · 카카오 장소 사용',
+          unconfirmed:'공개 상권 업종 미확인'}[result.merchant_lookup];
+        $('regionNote').textContent = [result.note, sourceStatus, ...(result.warnings || [])].filter(Boolean).join(' ');
         if (state.regions.length) selectRegion(0);
         else {
           state.locationError = (result.warnings || []).join(' ') || '지역 후보를 찾지 못했습니다.';
@@ -1208,6 +1255,7 @@
         <span>GPS <b>${navigator.geolocation ? '사용 가능' : '미지원'}</b></span>
         <span>지도 제공 <b>${state.kakaoKey ? '카카오맵' : 'SVG (폴백)'}</b></span>
         <span>문맥 분석 <b>${cfg.context_analysis ? '활성' : '미활성'}</b></span>
+        <span>상권 업종 조회 <b>${cfg.merchant_lookup_configured ? '활성' : '키 미설정'}</b></span>
         <span>공개 메뉴 조회 <b>${cfg.verified_menu_lookup ? '활성' : '미활성'}</b></span>`;
     } catch (err) { $('apiStatus').innerHTML = `<span>서버 오류: ${esc(err.message)}</span>`; }
   }

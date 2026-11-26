@@ -8,9 +8,10 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List
 
-from .config import KAKAO_REST_API_KEY
+from .config import KAKAO_REST_API_KEY, SBDC_API_KEY
 from .direction import haversine, calculate_bearing, get_direction
 from .location_context import normalize_name, resolve_place, within_region
+from .merchant_catalog import industry_match, merge_merchants, search_merchants
 from .optimizer import recommend_routes
 from .places import load_places
 from .place_clusters import CANDIDATE_POOL_LIMIT, cluster_places
@@ -252,6 +253,10 @@ def context_matches(place: dict, activity: dict) -> bool:
     if category == 'palace' and within_region(place.get('address') or '', '서울'):
         # 서울의 고궁 추천에서는 검색에 함께 올라오는 개별 전각·시설을 제외한다.
         return matches_activity(place, activity)
+    if category in ('history_museum', 'market_food', 'swimming'):
+        return matches_activity(place, activity)
+    if industry_match(list(words), activity.get('industry_terms', [])):
+        return True
     if category in VENUE_TYPES:
         if category == 'shopping' and '백화점' in (activity.get('venue_kind') or activity.get('request_term') or ''):
             return '백화점' in words
@@ -297,21 +302,47 @@ def context_candidates(center: dict | None, activity: dict, radius: float, scope
         candidates = fixed_candidate(activity, existing or [], center, radius, scope)
     else:
         specific = activity.get('search_query')
+        industries = activity.get('industry_terms', [])
+        query_alternates = activity.get('search_queries', [])
         venue_query = CONTEXT_QUERIES.get(category) or activity.get('venue_kind')
-        queries = dict.fromkeys(query for query in (specific, venue_query) if query)
+        queries = dict.fromkeys(query for query in (specific, *query_alternates) if query)
+        if not queries and venue_query:
+            queries = {venue_query: None}
         candidates = []
-        for query in queries:
+        kakao_error = None
+
+        def lookup(query, extra_distance=False):
             scoped_query = f'{scope} {query}' if not center and scope and scope not in query else query
             records = search_live(scoped_query, center, radius, region_scope=scope, sort_by_distance=False)
-            if center:
-                # 정확도순에 이어 주변 후보를 추가해 가장 가까운 건물 한 곳으로 쏠리지 않게 한다.
+            if center and extra_distance:
                 records += search_live(scoped_query, center, radius, region_scope=scope)
-            candidates = [{**place, 'category': category} for place in {p['id']: p for p in records}.values()
-                          if context_matches(place, activity)]
-            if candidates:
-                if specific and query != specific:
-                    candidates = [{**place, 'venue_condition_unconfirmed': specific} for place in candidates]
-                break
+            return [{**place, 'category': category} for place in records if context_matches(place, activity)]
+
+        for i, query in enumerate(queries):
+            try:
+                candidates.extend(lookup(query, extra_distance=(i == 0)))
+            except RuntimeError as error:
+                kakao_error = error
+        if not candidates and venue_query and venue_query not in queries:
+            try:
+                candidates = [{**place, 'venue_condition_unconfirmed': specific}
+                              for place in lookup(venue_query, extra_distance=True)]
+            except RuntimeError as error:
+                kakao_error = error
+        candidates = list({place['id']: place for place in candidates}.values())
+        if center and industries and category not in ('baseball_game', 'baseball_event', 'history_museum', 'palace', 'market_food'):
+            try:
+                merchants = search_merchants(center, radius, scope, industries)
+            except (OSError, ValueError, TypeError, KeyError):
+                merchants = []
+            merchants = [{**place, 'category': category} for place in merchants]
+            if specific:
+                merchants = [{**place, 'venue_condition_unconfirmed': specific}
+                             if not industry_match([place['name'], place['merchant'].get('industry')], [specific]) else place
+                             for place in merchants]
+            candidates = merge_merchants(candidates, merchants)
+        if not candidates and kakao_error:
+            raise kakao_error
     if category == 'market_food':
         return markets_with_food(candidates, scope, terms)
     return annotate_menus(candidates, terms) if category in ('restaurant', 'cafe', 'bar') else candidates
@@ -482,17 +513,21 @@ def recommend_regions(request: Dict) -> Dict:
     if contextual:
         ranked = unique_courses([route for region in regions for route in region['routes']])
         recommendations = ranked[:5]
-        for rank, route in enumerate(recommendations, 1):
+        for rank, route in enumerate(ranked, 1):
             route['rank'] = rank
         for region in regions:
             region['routes'] = [route for route in recommendations if route['region_id'] == region['id']]
             region['draft_route'] = next((route for route in region['routes'] if not route.get('preview')), None)
         regions.sort(key=lambda region: (not region['routes'],
                      recommendations.index(region['routes'][0]) if region['routes'] else len(region['missing_activities'])))
-        return {'regions': regions, 'recommendations': recommendations, 'searched_region_count': len(regions),
-                'scanned_headings': len(HEADINGS), 'direction_candidate_count': len(ranked),
+        has_merchant = any(place.get('merchant') for region in regions for place in region['places'])
+        merchant_status = 'matched' if has_merchant else 'unconfirmed' if SBDC_API_KEY else 'unconfigured'
+        return {'regions': regions, 'recommendations': recommendations, 'alternative_routes': ranked[5:],
+                'searched_region_count': len(regions), 'merchant_lookup': merchant_status,
+                'scanned_headings': len(HEADINGS) if request.get('requested_bearing') is None else 1,
+                'direction_candidate_count': len(ranked),
                 'warnings': [] if regions else ['방문 지역에서 첫 활동에 맞는 장소를 확인하지 못했습니다.'],
-                'note': '10° 간격으로 360°를 비교합니다. 경로의 이동시간은 추정치이며 방문 조건 확인이 필요합니다.'}
+                'note': '폭 10° 방향별로 비교하며 필요할 때 양옆 구역을 함께 탐색합니다. 이동시간은 추정치입니다.'}
     regions.sort(key=lambda region: (len(region['missing_activities']), region['status'] == 'time_conflict',
                                      (region['draft_route'] or {}).get('total_travel_minutes', 100000)))
     anchor_label = '역사 박물관' if first_category == 'history_museum' else '등산로 입구'

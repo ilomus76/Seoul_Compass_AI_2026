@@ -35,6 +35,18 @@ h2 { font-family:var(--serif); font-size:14px; margin:0; }
 .section-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
 .hint { color:var(--muted); font-size:9px; margin:3px 0 7px; }
 
+body.alternative-page { overflow-y:auto; font-size:14px; }
+.alternative-content { max-width:1040px; margin:0 auto; padding:36px clamp(16px, 5vw, 56px) 48px; }
+.alternative-content a,#additionalCoursesLink { color:var(--accent); font-weight:600; }
+.alternative-content h1 { margin:12px 0 26px; font:700 clamp(24px, 4vw, 36px)/1.25 var(--serif); }
+.alternative-content h2 { font-size:20px; margin-top:24px; }
+.alternative-content .hint { font-size:13px; }
+.alternative-list { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap:12px; margin:12px 0 24px; }
+.alternative-list .route-card { padding:14px; background:var(--panel); }
+.alternative-list ol,.alternative-list ul { margin:8px 0 0; padding-left:1.4em; }
+.alternative-list li { margin:4px 0; }
+#additionalCoursesLink:not([hidden]) { display:inline-block; margin:0 0 8px; }
+
 /* GPS */
 .gps-box { border:1px solid var(--line); border-radius:11px; padding:9px; background:var(--solid); margin-bottom:10px; }
 .gps-status { font-size:9px; color:var(--muted); margin:6px 0 0; }

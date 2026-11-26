@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import ai_parser, context_parser, density, history, network_routes, optimizer, report, safety, schedule, weather
-from .config import CONTEXT_LLM_ENABLED, FRONTEND_DIR, HOST, KAKAO_JAVASCRIPT_KEY, PORT, TOUR_API_KEY
+from .config import CONTEXT_LLM_ENABLED, FRONTEND_DIR, HOST, KAKAO_JAVASCRIPT_KEY, PORT, SBDC_API_KEY, TOUR_API_KEY
 from .direction import analyze_directions, calculate_bearing, get_direction
 from .places import find_by_keywords, load_places, search_places
 from .location_context import apply_location_context
@@ -251,6 +251,7 @@ def frontend_config() -> Dict:
             "kakao_javascript_key": KAKAO_JAVASCRIPT_KEY,
             "context_analysis": CONTEXT_LLM_ENABLED,
             "verified_menu_lookup": bool(TOUR_API_KEY),
+            "merchant_lookup_configured": bool(SBDC_API_KEY),
             "map_mode": "kakao" if KAKAO_JAVASCRIPT_KEY else "svg"}
 
 
@@ -273,6 +274,11 @@ def index():
     if index_file.exists():
         return FileResponse(index_file)
     return {"message": "frontend/index.html이 없습니다."}
+
+
+@app.get('/alternatives', include_in_schema=False)
+def alternatives():
+    return FileResponse(FRONTEND_DIR / 'alternatives.html')
 
 
 if __name__ == "__main__":

@@ -25,6 +25,8 @@ class Activity(BaseModel):
     keywords: List[str] = Field(default_factory=list)
     required_keywords: List[str] = Field(default_factory=list)
     search_query: Optional[str] = None
+    search_queries: List[str] = Field(default_factory=list, max_length=2)
+    industry_terms: List[str] = Field(default_factory=list, max_length=4)
     venue_kind: Optional[str] = None
     menu_terms: List[str] = Field(default_factory=list)
     duration_estimated: bool = True

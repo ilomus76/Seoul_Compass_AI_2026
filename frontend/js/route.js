@@ -64,7 +64,7 @@
       if (r.score != null) reasons.push(`${r.score === bestScore ? '표시 경로 중 최고 ' : ''}종합 점수 ${r.score}점`);
       if (r.corridor) {
         const {heading, variant} = r.corridor;
-        const side = {primary:'좌우 10°', left:'왼쪽 30° 대안', right:'오른쪽 30° 대안'}[variant];
+        const side = {primary:'10° 구역', adjacent:'양옆 10° 구역 연결'}[variant];
         reasons.push(`기준 ${Math.round(heading) % 360}° · ${side}`);
       }
       const confirmed = r.nodes.filter(node => node.place.menu_status === 'matched');
@@ -87,14 +87,15 @@
 
   function venueDetails(route) {
     const venues = route?.nodes.map(node => node.place).filter(place =>
-      !place.food_options?.length && (place.menu_status || place.phone || place.place_url)) || [];
+      !place.food_options?.length && (place.merchant || place.menu_status || place.phone || place.place_url)) || [];
     if (!venues.length) return '';
     return `<div class="market-food-options"><strong>선택 코스 장소 정보</strong><ul>${venues.map(place => {
       const title = /^https?:\/\//i.test(place.place_url || '')
         ? `<a href="${esc(place.place_url)}" target="_blank" rel="noopener noreferrer">${esc(place.name)}</a>` : esc(place.name);
       const menus = place.menus?.length ? ` · ${esc(place.menus.join(' / '))} (${esc(place.menu_source)})` : '';
       const check = ['unconfirmed', 'unavailable'].includes(place.menu_status) ? ' · 메뉴 확인 필요' : '';
-      return `<li>${title}${menus}${check}${venuePhone(place.phone)}</li>`;
+      const industry = place.merchant?.industry ? ` · ${esc(place.merchant.industry)} (상권정보)` : '';
+      return `<li>${title}${industry}${menus}${check}${venuePhone(place.phone)}</li>`;
     }).join('')}</ul></div>`;
   }
 
