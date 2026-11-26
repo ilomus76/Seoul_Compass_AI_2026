@@ -23,12 +23,23 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 9200
 
 > `server.py`는 이전 정적 데모용 파일입니다. 현재 서비스는 `backend/main.py`(FastAPI)를 실행해야 합니다.
 
+### 앱으로 설치하기
+
+`dev_choi_v1.0.3`의 서울 컴패스 AI는 브라우저에서 설치할 수 있는 웹앱(PWA)입니다. PC에서는 서버를 실행한 뒤 Chrome 또는 Edge로 [로컬 앱](http://127.0.0.1:9200/)을 열고 상단의 **앱 설치**를 선택합니다.
+
+- Android에서는 설치 버튼이나 Chrome 메뉴의 **앱 설치/홈 화면에 추가**를 이용합니다. [Chrome 웹앱 설치 안내](https://developer.chrome.com/docs/modern-web-guidance/guides/pwa/install-web-app)
+- iPhone에서는 Safari의 **공유 → 홈 화면에 추가**를 이용합니다. **웹 앱으로 열기** 옵션이 표시되면 켭니다. [Apple 웹앱 설치 안내](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios)
+- 별도 기기에서 설치하려면 그 기기에서 접속 가능한 HTTPS 앱 주소가 필요합니다. `127.0.0.1:9200`은 서버를 실행한 PC의 로컬 주소입니다.
+- 한 번 연결한 앱을 오프라인에서 열면 연결 안내가 표시됩니다. 지도, 장소 검색, 일정 계산과 여행 기록은 서버 연결 상태에서 사용합니다.
+
 테스트:
 
 ```powershell
 python -m unittest discover -s tests
 # 지도 군집·시간대 동선 검증 (설치된 Node.js 사용)
 node --test tests/test_journey.cjs
+# 앱 설치 설정과 연결 끊김 화면 검증
+node --test tests/test_pwa.cjs
 ```
 
 ## 주요 기능

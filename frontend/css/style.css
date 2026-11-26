@@ -19,6 +19,16 @@ button { cursor:pointer; }
 .quick-form input { flex:1; min-width:80px; background:var(--solid); color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:9px 14px; font-size:12px; outline:none; }
 .quick-form input:focus { border-color:var(--gold); }
 .top-actions { display:flex; gap:5px; }
+.top-actions .install-app { color:var(--accent); border-color:var(--accent); }
+.install-help { width:min(420px,calc(100% - 32px)); padding:22px; border:1px solid var(--line);
+  border-radius:14px; background:var(--panel); color:var(--ink); box-shadow:var(--shadow); font-size:14px; }
+.install-help::backdrop { background:#101c35a0; }
+.install-help h2 { font-size:19px; }
+.install-help ul { padding-left:20px; }
+.install-help li + li { margin-top:7px; }
+.install-help p { color:var(--muted); }
+.install-help form { text-align:right; }
+.install-help button { min-height:40px; padding-inline:17px; font-size:13px; }
 
 /* 3열 관측 데스크 */
 .observatory { position:fixed; inset:58px 0 104px; display:grid; grid-template-columns:216px minmax(0,1fr) 330px; }
@@ -303,4 +313,20 @@ body.sim-rain .map-stage::before { content:''; position:absolute; inset:0; z-ind
   .rail-body { max-height:none; }
   .map-stage { height:56vh; }
   .scrubber { position:sticky; height:auto; }
+}
+
+@media (max-width:600px) {
+  .topbar { gap:8px; padding-top:max(8px,env(safe-area-inset-top));
+    padding-left:max(8px,env(safe-area-inset-left)); padding-right:max(8px,env(safe-area-inset-right)); }
+  .brand { flex:1 0 auto; }
+  .brand span { display:none; }
+  .top-actions { flex-wrap:wrap; }
+  .top-actions button { min-height:36px; padding-inline:7px; }
+  .quick-form input { min-width:0; font-size:16px; padding-inline:8px; }
+  .quick-form #uiLang { width:62px; }
+  .quick-form button,.quick-form input,.quick-form select { min-height:44px; }
+  .observatory { display:flex; flex-direction:column; }
+  .map-stage { order:-1; height:clamp(300px,55svh,515px); }
+  .rail-nav button { min-width:44px; min-height:44px; }
+  .scrubber { padding-bottom:max(10px,env(safe-area-inset-bottom)); }
 }

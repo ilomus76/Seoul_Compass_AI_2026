@@ -282,6 +282,22 @@ def alternatives():
     return FileResponse(FRONTEND_DIR / 'alternatives.html')
 
 
+@app.get('/manifest.webmanifest', include_in_schema=False)
+def app_manifest():
+    return FileResponse(FRONTEND_DIR / 'manifest.webmanifest', media_type='application/manifest+json')
+
+
+@app.get('/service-worker.js', include_in_schema=False)
+def service_worker():
+    return FileResponse(FRONTEND_DIR / 'service-worker.js', media_type='text/javascript',
+                        headers={'Cache-Control': 'no-cache'})
+
+
+@app.get('/offline.html', include_in_schema=False)
+def offline_page():
+    return FileResponse(FRONTEND_DIR / 'offline.html')
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=HOST, port=PORT)
