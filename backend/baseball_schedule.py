@@ -113,23 +113,28 @@ def event_name_key(name: str) -> str:
     return normalize_name(re.sub(r'(?<!\d)(?:19|20)\d{2}(?!\d)', '', name))
 
 
+def event_location_matches(event: dict, activity: dict) -> bool:
+    venues = {normalize_name(name) for name in (event['venue'], *event.get('venue_aliases', ()))}
+    venue = normalize_name(activity.get('location') or '')
+    area = activity.get('search_area')
+    return (not venue or venue in venues) and (not area or normalize_name(area) in venues or within_region(event['address'], area))
+
+
 def event_options(activity: dict, travel_date: date, region: str | None) -> tuple[list[dict], bool]:
     """날짜·지역·구장·대진 조건을 적용하고 API 실패를 빈 응답과 구별한다."""
-    venue = normalize_name(activity.get('location') or '')
     terms = [term for term in map(event_name_key, activity.get('event_terms', []))
              if term and term not in GENERIC_EVENT_TERMS]
 
     def matches(event):
-        venues = [event['venue'], *event.get('venue_aliases', ())]
         names = event_name_key(' '.join([event['name'], *event.get('search_names', [])]))
         return (within_region(event['address'], region)
-                and (not venue or any(venue == normalize_name(name) for name in venues))
+                and event_location_matches(event, activity)
                 and all(term in names for term in terms))
 
     registered = [event for event in events()
                   if abs((date.fromisoformat(event['date']) - travel_date).days) <= 1
                   and within_region(event['address'], region)
-                  and (not venue or venue == normalize_name(event['venue']))]
+                  and event_location_matches(event, activity)]
     options = [{**event, 'source': '주최 측', 'official_url': event['source_url']}
                for event in registered if matches(event)]
     if activity['category'] != 'baseball_game':
@@ -165,7 +170,7 @@ def schedule_links(activity: dict, travel_date: date | None, region: str | None)
     for event in events():
         if (travel_date and abs((date.fromisoformat(event['date']) - travel_date).days) <= 1
                 and within_region(event['address'], region)
-                and (not activity.get('location') or normalize_name(activity['location']) == normalize_name(event['venue']))):
+                and event_location_matches(event, activity)):
             link = {'label': '한일 드림 플레이어즈 게임 공식 홈페이지', 'url': event['source_url']}
             if link not in links:
                 links.insert(0, link)

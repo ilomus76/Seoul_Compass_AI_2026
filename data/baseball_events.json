@@ -5,6 +5,7 @@
     "date": "2026-12-04",
     "start_time": "18:30",
     "venue": "고척스카이돔",
+    "venue_aliases": ["고척", "고척돔", "고척동"],
     "address": "서울 구로구 경인로 430",
     "source_url": "https://dreamplayers.kr/"
   },
@@ -14,6 +15,7 @@
     "date": "2026-12-05",
     "start_time": "14:00",
     "venue": "고척스카이돔",
+    "venue_aliases": ["고척", "고척돔", "고척동"],
     "address": "서울 구로구 경인로 430",
     "source_url": "https://dreamplayers.kr/"
   }

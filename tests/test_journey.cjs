@@ -36,23 +36,37 @@ test('추가 코스 페이지는 6위 코스와 별도 장소 목록을 같은 �
     return elements.get(id);
   }, createElement:node};
   const data = {routes:[{rank:6,corridor:{heading:0,variant:'adjacent'},distance:1.2,minutes:25,
-    stops:[{time:'10:00',name:'시험 카페',term:'커피'}]}],
+    stops:[{time:'10:00',name:'시험 카페',term:'커피',menu_status:'unconfirmed',
+      menu_model:{relatedness:18,supporting_neighbors:2}}]}],
   places:[{label:'커피',items:[{name:'다른 카페',industry:'카페',url:'https://example.com'}]}],
-  directions:[{kind:'reference', region:'시험 지역', base:'시험 구장', radius:5, activity:'식사', rows:{
-    0:{heading:0,status:'selected',rank:1}, 90:{heading:90,status:'missing_clusters'},
-    180:{heading:180,status:'rank_limit',factor:'직선 연결 거리',leg_km:2.3}}}]};
+  directions:[{kind:'reference', region:'시험 지역', base:'시험 구장', radius:5, activity:'식사',
+    land_use_source:{name:'서울시 생태현황도',year:2025,url:'https://data.seoul.go.kr/'}, rows:{
+      0:{heading:0,status:'selected',rank:1},
+      90:{heading:90,status:'missing_clusters',land_use:{coverage_percent:80,
+        types:[{name:'주거지',percent:70},{name:'산림지',percent:25}],commercial_percent:5}},
+      180:{heading:180,status:'rank_limit',factor:'직선 연결 거리',leg_km:2.3},
+      270:{heading:270,status:'missing_clusters',land_use:{coverage_percent:20,types:[]}}}}]};
   const source = readFileSync(join(__dirname, '../frontend/js/alternatives.js'), 'utf8');
-  runInNewContext(source, {document, sessionStorage:{getItem:() => JSON.stringify(data)}});
+  const page = {window:{}, document, sessionStorage:{getItem:() => JSON.stringify(data)}};
+  runInNewContext(readFileSync(join(__dirname, '../frontend/js/route.js'), 'utf8'), page);
+  runInNewContext(source, page);
   assert.equal(elements.get('emptyState').hidden, true);
   assert.match(elements.get('additionalRoutes').children[0].children[0].textContent, /추천 6.*양옆/);
+  const menu = elements.get('additionalRoutes').children[0].children[2].children[0].children[0].innerHTML;
+  assert.match(menu, /관련도 18점.*판매 확인 필요/);
+  assert.doesNotMatch(menu, /공개 메뉴 근거/);
   assert.equal(elements.get('additionalPlaces').children[0].children[1].children[0].children[0].href,
     'https://example.com');
   assert.equal(elements.get('directionReview').hidden, false);
-  const rows = elements.get('directionReports').children[0].children[2].children[1].children;
-  assert.equal(rows.length, 3);
+  const report = elements.get('directionReports').children[0];
+  assert.equal(report.children[2].children[0].href, 'https://data.seoul.go.kr/');
+  const rows = report.children[3].children[1].children;
+  assert.equal(rows.length, 4);
   assert.match(rows[0].children[1].textContent, /참고 동선 1/);
   assert.match(rows[1].children[2].textContent, /‘식사’에 맞는 후보 군집을 찾지 못했습니다/);
+  assert.match(rows[1].children[2].children[0].textContent, /주거지 70% · 산림지 25% · 상업·업무지 5%.*80%/);
   assert.match(rows[2].children[2].textContent, /직선 연결 거리 비교에서 상위 5개보다/);
+  assert.match(rows[3].children[2].children[0].textContent, /표본이 부족합니다.*20%/);
 });
 const a = {id:'a', name:'시험 산', category:'hiking', lat:37.45, lng:126.78};
 const b = {id:'b', name:'시험 수영장', category:'swimming', lat:37.46, lng:126.79};
@@ -63,6 +77,85 @@ const activities = [
   {id:3, category:'restaurant', start_time:'15:00'}
 ];
 const data = () => ({start:{latitude:a.lat, longitude:a.lng}, activities, places:[a,b,c]});
+
+test('컴패스와 SVG 지도에서 선택한 검색 범위와 1·3·5km 점선 원을 함께 표시한다', () => {
+  const page = {window:{SeoulJourney:J}, document:{getElementById:id => id === 'scrubSlider' ? {value:0} : null}};
+  runInNewContext(readFileSync(join(__dirname, '../frontend/js/compass.js'), 'utf8'), page);
+  const map = page.window.SeoulCompassMap;
+  const container = {innerHTML:'', querySelector:() => null, querySelectorAll:() => []};
+  for (const [draw, extent] of [[map.render, 245], [map.renderGeo, 275]]) {
+    draw(container, {...data(), radius_km:3});
+    const circles = [...container.innerHTML.matchAll(/class="radius-ring"[^>]+r="([\d.]+)"[^>]+stroke="([^"]+)"\s+stroke-width="1" stroke-dasharray="1 4"/g)];
+    assert.deepEqual(circles.map(([, r, color]) => [Number(r), color]),
+      [[extent / 5, '#2563EB'], [extent * 3 / 5, '#15803D'], [extent, '#E53935']]);
+    assert.ok(container.innerHTML.includes(`A${extent * 3 / 5} ${extent * 3 / 5}`));
+    draw(container, {...data(), radius_km:10});
+    assert.match(container.innerHTML, /fill="#64748B"[^>]*>반경 10km/);
+  }
+});
+
+test('두 손가락 확대 후 버튼으로 축소하면 같은 SVG 배율로 돌아온다', () => {
+  const page = {window:{}};
+  for (const module of ['compass', 'map']) {
+    runInNewContext(readFileSync(join(__dirname, `../frontend/js/${module}.js`), 'utf8'), page);
+  }
+  const handlers = {};
+  const svg = {viewBox:{baseVal:{x:100, y:120, width:400, height:400}},
+    setAttribute(_name, value) {
+      const [x, y, width, height] = value.split(' ').map(Number);
+      this.viewBox.baseVal = {x, y, width, height};
+    }};
+  const container = {querySelector:() => svg, addEventListener:(type, handler) => { handlers[type] = handler; }};
+  const zoom = steps => page.window.SeoulCompassMap.zoom(container, 1.25 ** steps);
+  page.window.SeoulMapHelper.bindPinchZoom(container, zoom);
+  const touch = (type, pointerId, clientX) => handlers[type]({
+    pointerType:'touch', pointerId, clientX, clientY:4, stopPropagation() {}
+  });
+  touch('pointerdown', 1, 0);
+  touch('pointerdown', 2, 100);
+  touch('pointermove', 2, 125);
+  assert.deepEqual(svg.viewBox.baseVal, {x:140, y:160, width:320, height:320});
+  touch('pointerup', 1, 0);
+  touch('pointerup', 2, 125);
+  zoom(1);
+  assert.deepEqual(svg.viewBox.baseVal, {x:100, y:120, width:400, height:400});
+  touch('pointerdown', 1, 0);
+  touch('pointerdown', 2, 100);
+  touch('pointermove', 2, 80);
+  assert.equal(svg.viewBox.baseVal.width, 500);
+  touch('pointercancel', 1, 0);
+  touch('pointerup', 2, 80);
+  let cancelled = false;
+  handlers.click({detail:1, preventDefault() { cancelled = true; }, stopImmediatePropagation() {}});
+  assert.ok(cancelled);
+});
+
+test('오른쪽 추천과 참고 동선에 원문 요청과 인식한 활동을 장소 옆에 표시한다', () => {
+  const page = {window:{SeoulJourney:J}};
+  for (const module of ['charts', 'route']) {
+    runInNewContext(readFileSync(join(__dirname, `../frontend/js/${module}.js`), 'utf8'), page);
+  }
+  const view = page.window.SeoulRouteView;
+  const options = {
+    start:{latitude:37.44, longitude:126.77, name:'서울역'},
+    requestText:'서울역에서 출발해서 순대국을 먹고 야구 경기를 보고 노래방에 가요.',
+    activities:[{category:'restaurant'}, {category:'baseball_game'}, {category:'karaoke', request_term:'노래방'}]
+  };
+  const route = {total_distance_km:4, total_travel_minutes:25, nodes:[
+    {place:{...a, name:'시험 <식당>', category:'cafe'}, request_term:'순대국'},
+    {place:{...b, name:'고척스카이돔'}, request_term:'야구 경기'},
+    {place:{...c, name:'시험 노래방'}}
+  ]};
+  const right = view.recommendationList([route], route, -1, options);
+  assert.match(right, /서울역\(서울역\) → 시험 &lt;식당&gt;\(순대국 · 식사\) → 고척스카이돔\(야구 경기 · 야구 경기 관람\) → 시험 노래방\(노래방\)/);
+  assert.match(right, /aria-expanded="false"/);
+  assert.doesNotMatch(right, /최단 직선 연결/);
+  const expanded = view.recommendationList([route], route, -1, options, route);
+  assert.match(expanded, /aria-expanded="true"/);
+  assert.match(expanded, /최단 직선 연결 4km/);
+  const reference = view.referenceCourse({...route, preview:true}, route, 0, options);
+  assert.match(reference, /<small>시험 &lt;식당&gt;\(순대국 · 식사\) → 고척스카이돔\(야구 경기 · 야구 경기 관람\)/);
+});
 
 test('참고 동선에서 출발부터 모든 경유지까지 연결하고 방문 경고를 빨간 장소에 표시한다', () => {
   const start = {latitude:37.44, longitude:126.77, name:'출발 위치'};
@@ -75,7 +168,7 @@ test('참고 동선에서 출발부터 모든 경유지까지 연결하고 방�
   assert.ok(J.routeLayers({...data(), routes:[route]}, route, 'all').every(leg => leg.color === J.REFERENCE_COLOR));
   runInNewContext(readFileSync(join(__dirname, '../frontend/js/route.js'), 'utf8'), context);
   const view = context.window.SeoulRouteView;
-  assert.match(view.referenceCourse(route, route, 0, start), /출발 위치.*시험 산 → <strong class="visit-warning">시험 수영장<\/strong> → 시험 식당/);
+  assert.match(view.referenceCourse(route, route, 0, {start}), /출발 위치.*시험 산 → <strong class="visit-warning">시험 수영장<\/strong> → 시험 식당/);
   assert.match(view.visitWarning(warning), /영업시간 밖.*https:\/\/example\.com\//);
 });
 
@@ -85,8 +178,9 @@ test('참고 동선 다섯 개는 같은 색상 목록과 지도에서 서로 �
   const layers = J.routeLayers({...data(), routes:courses}, courses[0], 'all');
   assert.equal(new Set(layers.map(leg => leg.color)).size, 5);
   const view = context.window.SeoulRouteView;
-  assert.match(view.referenceCourse(courses[4], courses[4], 0, null, 4), /data-route="4" aria-pressed="true">참고 5 · 방향 240°/);
-  assert.match(view.referenceCourse(courses[4], courses[4], 0, null, 4), /--reference-color:#397044/);
+  assert.match(view.referenceCourse(courses[4], courses[4], 0, {}, 4, courses[4]), /data-route="4" aria-pressed="true" aria-expanded="true".*\s+<strong>참고 5\]<\/strong>/);
+  assert.match(view.referenceCourse(courses[4], courses[4], 0, {}, 4, courses[4]), /방향 240°/);
+  assert.match(view.referenceCourse(courses[4], courses[4], 0, {}, 4), /--reference-color:#397044/);
 });
 
 test('50m 반경 군집은 중복·잘못된 좌표를 제외하고 실제 장소를 대표로 쓴다', () => {

@@ -3,6 +3,9 @@
   'use strict';
   const NAMES = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
   const LABELS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const RADIUS_RINGS = [{km:1, color:'#2563EB'}, {km:3, color:'#15803D'}, {km:5, color:'#E53935'}];
+  const displayRadius = searchRadius => Math.max(5, Number(searchRadius) || 5);
+  const mapExtent = mode => mode === 'geo' ? 275 : 245;
   const C = global.SeoulCharts || { COLORS: {}, SECTOR_COLORS: [] };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
@@ -10,6 +13,20 @@
   function point(cx, cy, r, deg) {
     const a = deg * Math.PI / 180;
     return [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+  }
+
+  function radiusRings(searchRadius) {
+    return searchRadius > 5 ? [...RADIUS_RINGS, {km:searchRadius, color:'#64748B'}] : RADIUS_RINGS;
+  }
+
+  function renderRings(searchRadius, extent) {
+    const outer = displayRadius(searchRadius);
+    return radiusRings(searchRadius).map(({km, color}) => {
+      const r = extent * km / outer;
+      return `<circle class="radius-ring" cx="300" cy="300" r="${r}" fill="none" stroke="${color}"
+        stroke-width="1" stroke-dasharray="1 4" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+        <text x="300" y="${300 - r + 14}" text-anchor="middle" fill="${color}" font-size="11" font-weight="600">반경 ${km}km</text>`;
+    }).join('');
   }
 
   // 오버레이를 다시 그릴 때 같은 검색의 SVG 확대 범위를 이어받는다.
@@ -21,7 +38,7 @@
       ? svg.getAttribute('viewBox') : '0 0 600 600';
     if (data.focusPoints?.length) {
       const center = {lat:Number(data.start.latitude), lng:Number(data.start.longitude)};
-      const projected = data.focusPoints.map(p => geoProject(p.lat, p.lng, center, radius, mode === 'geo' ? 275 : 245));
+      const projected = data.focusPoints.map(p => geoProject(p.lat, p.lng, center, displayRadius(radius), mapExtent(mode)));
       const xs = projected.map(p => p.x), ys = projected.map(p => p.y);
       const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys);
       const size = Math.min(600, Math.max(150, (right - left) + 75, (bottom - top) + 75));
@@ -34,28 +51,23 @@
   function render(container, data) {
     if (!container) return;
     const { places = [], scores = {}, route = null } = data;
-    const cx = 300, cy = 300, maxR = 245;
+    const cx = 300, cy = 300, maxR = mapExtent('polar');
     const radius = Math.max(1, Number(data.radius_km || 5));
+    const outer = displayRadius(radius);
+    const sectorRadius = maxR * radius / outer;
     const sectorColors = C.SECTOR_COLORS.length ? C.SECTOR_COLORS
       : ['#b45f54','#c08a4a','#b8914e','#6f9b6a','#2f8f83','#5479b0','#6b5ba8','#9b6aa0'];
     const categoryColors = C.COLORS || {};
 
     const sectors = NAMES.map((name, i) => {
       const a0 = i * 45 - 22.5, a1 = a0 + 45;
-      const [x0, y0] = point(cx, cy, maxR, a0);
-      const [x1, y1] = point(cx, cy, maxR, a1);
+      const [x0, y0] = point(cx, cy, sectorRadius, a0);
+      const [x1, y1] = point(cx, cy, sectorRadius, a1);
       const score = Number(scores[name] || 0);
       const opacity = 0.12 + Math.min(0.68, score / 130);
-      return `<path class="sector" d="M${cx} ${cy} L${x0.toFixed(1)} ${y0.toFixed(1)} A${maxR} ${maxR} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)} Z"
-        fill="${sectorColors[i % 8]}" opacity="${opacity.toFixed(2)}" stroke="${sectorColors[i % 8]}" stroke-width="1">
+      return `<path class="sector" d="M${cx} ${cy} L${x0.toFixed(1)} ${y0.toFixed(1)} A${sectorRadius} ${sectorRadius} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)} Z"
+        fill="${sectorColors[i % 8]}" opacity="${opacity.toFixed(2)}">
         <title>${name} 방향 · ${score}점</title></path>`;
-    }).join('');
-
-    const rings = [0.25, 0.5, 0.75, 1].map((k) => {
-      const r = maxR * k;
-      const [lx, ly] = point(cx, cy, r + 10, 22.5);
-      return `<circle class="grid-ring" cx="${cx}" cy="${cy}" r="${r.toFixed(0)}"/>
-        ${k < 1 ? `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="#94a3c0" font-size="9">${(radius * k).toFixed(1)}km</text>` : ''}`;
     }).join('');
 
     const labels = NAMES.map((name, i) => {
@@ -64,7 +76,7 @@
     }).join('');
 
     const markers = places.map((p) => {
-      const r = Math.min(maxR, (p.distance_km / radius) * maxR);
+      const r = Math.min(maxR, (p.distance_km / outer) * maxR);
       const [x, y] = point(cx, cy, r, p.bearing || 0);
       const color = p.visit_warning ? global.SeoulJourney.REFERENCE_COLOR : categoryColors[p.category] || '#a86a8f';
       return `<g class="marker" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">
@@ -75,7 +87,7 @@
 
     const nodes = route && route.nodes ? route.nodes : [];
     const pts = nodes.map((n) => {
-      const r = Math.min(maxR, (n.distance_km / radius) * maxR);
+      const r = Math.min(maxR, (n.distance_km / outer) * maxR);
       return point(cx, cy, r, n.place.bearing || 0);
     });
     const routePath = pts.length > 1
@@ -87,16 +99,14 @@
       <defs><linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stop-color="#b8914e"/><stop offset="0.5" stop-color="#2f8f83"/><stop offset="1" stop-color="#b45f54"/>
       </linearGradient></defs>
-      ${sectors}${rings}
-      <circle cx="300" cy="300" r="${maxR}" fill="none" stroke="#E53935" stroke-width="3"/>
-      <text x="300" y="${cy - maxR + 14}" text-anchor="middle" fill="#E53935" font-size="11" font-weight="600">반경 ${radius}km</text>
+      ${sectors}${renderRings(radius, maxR)}
       <line x1="${cx}" y1="24" x2="${cx}" y2="576" stroke="rgba(255,255,255,.12)"/>
       <line x1="24" y1="${cy}" x2="576" y2="${cy}" stroke="rgba(255,255,255,.12)"/>
       ${labels}${data.journey || data.route_layers?.length ? '' : routePath + routeNodes}${markers}
       <circle class="start-pulse" cx="${cx}" cy="${cy}" r="10"/>
       <circle cx="${cx}" cy="${cy}" r="9" fill="#b8914e" stroke="#f5f2eb" stroke-width="2"/>
       <text x="${cx + 14}" y="${cy + 4}" fill="#eef3ff" font-size="10">출발지</text>
-      ${renderJourney(data, {lat:Number(data.start.latitude), lng:Number(data.start.longitude)}, radius, maxR)}
+      ${renderJourney(data, {lat:Number(data.start.latitude), lng:Number(data.start.longitude)}, outer, maxR)}
     </svg>`;
     global.SeoulJourney.highlight(container, Number(document.getElementById('scrubSlider').value));
 
@@ -129,10 +139,12 @@
       lat: Number(raw.latitude != null ? raw.latitude : (raw.lat != null ? raw.lat : 37.5665)),
       lng: Number(raw.longitude != null ? raw.longitude : (raw.lng != null ? raw.lng : 126.9780))
     };
-    const radius = Math.max(1, Number(data.radius_km || 5));
+    const searchRadius = Math.max(1, Number(data.radius_km || 5));
+    const radius = displayRadius(searchRadius);
     const places = data.places || [], scores = data.scores || {};
     const route = data.route || null;
-    const extent = 275;
+    const extent = mapExtent('geo');
+    const sectorRadius = extent * searchRadius / radius;
     const sectorColors = C.SECTOR_COLORS.length ? C.SECTOR_COLORS
       : ['#b45f54','#c08a4a','#b8914e','#6f9b6a','#2f8f83','#5479b0','#6b5ba8','#9b6aa0'];
 
@@ -159,17 +171,14 @@
     // 방향 부채꼴과 반경 원 (지도 위에 겹침)
     const sectors = NAMES.map((name, i) => {
       const a0 = i * 45 - 22.5, a1 = a0 + 45;
-      const [x0, y0] = point(300, 300, extent, a0);
-      const [x1, y1] = point(300, 300, extent, a1);
+      const [x0, y0] = point(300, 300, sectorRadius, a0);
+      const [x1, y1] = point(300, 300, sectorRadius, a1);
       const score = Number(scores[name] || 0);
       const opacity = 0.08 + Math.min(0.45, score / 180);
-      return `<path class="sector" d="M300 300 L${x0.toFixed(1)} ${y0.toFixed(1)} A${extent} ${extent} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)} Z"
-        fill="${sectorColors[i % 8]}" opacity="${opacity.toFixed(2)}" stroke="${sectorColors[i % 8]}" stroke-width="1">
+      return `<path class="sector" d="M300 300 L${x0.toFixed(1)} ${y0.toFixed(1)} A${sectorRadius} ${sectorRadius} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)} Z"
+        fill="${sectorColors[i % 8]}" opacity="${opacity.toFixed(2)}">
         <title>${name} 방향 · ${score}점</title></path>`;
     }).join('');
-    const rings = [0.25, 0.5, 0.75, 1].map((k) => `
-      <circle cx="300" cy="300" r="${(extent * k).toFixed(0)}" fill="none" stroke="rgba(255,255,255,.16)" stroke-dasharray="3 7"/>
-      ${k < 1 ? `<text class="map-label" x="305" y="${(300 - extent * k - 4).toFixed(0)}">${(radius * k).toFixed(1)}km</text>` : ''}`).join('');
     const dirs = NAMES.map((name, i) => {
       const [x, y] = point(300, 300, extent + 14, i * 45);
       return `<text translate="no" x="${x.toFixed(0)}" y="${y.toFixed(0)}" text-anchor="middle" fill="var(--ink)" font-size="9" font-weight="600">${LABELS[i]}</text>`;
@@ -200,15 +209,14 @@
       }
     });
 
-    container.innerHTML = `<svg ${viewport(container, data, 'geo', radius)} preserveAspectRatio="xMidYMid meet" role="img" aria-label="지도에 매핑된 360도 방향 분석">
+    container.innerHTML = `<svg ${viewport(container, data, 'geo', searchRadius)} preserveAspectRatio="xMidYMid meet" role="img" aria-label="지도에 매핑된 360도 방향 분석">
       <defs><linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stop-color="#b8914e"/><stop offset="0.5" stop-color="#2f8f83"/><stop offset="1" stop-color="#b45f54"/>
       </linearGradient></defs>
       <rect x="0" y="0" width="600" height="600" rx="18" style="fill:var(--panel)" opacity=".9"/>
-      ${grid}${sectors}${rings}
-      <circle cx="300" cy="300" r="${extent}" fill="none" stroke="#E53935" stroke-width="3"/>
-      <text x="300" y="${300 - extent + 14}" text-anchor="middle" fill="#E53935" font-size="11" font-weight="600">반경 ${radius}km</text>
+      ${grid}${sectors}
       <path class="map-river" d="${riverPath}"/><text class="map-water-label" x="330" y="300">한강</text>
+      ${renderRings(searchRadius, extent)}
       ${labels}${dirs}${routePath}${routeNodes}${markers}
       <circle class="start-pulse" cx="300" cy="300" r="10"/>
       <circle cx="300" cy="300" r="9" fill="#b8914e" stroke="#f5f2eb" stroke-width="2"/>
@@ -224,22 +232,27 @@
   }
 
   // 시뮬레이션 마커용 좌표 계산 (renderGeo와 동일한 투영)
-  function projectForSim(place, start, radiusKm) {
+  function projectForSim(place, start, radiusKm, mode) {
     const raw = start || {};
     const center = {
       lat: Number(raw.latitude != null ? raw.latitude : (raw.lat != null ? raw.lat : 37.5665)),
       lng: Number(raw.longitude != null ? raw.longitude : (raw.lng != null ? raw.lng : 126.9780))
     };
-    return geoProject(place.lat, place.lng, center, Number(radiusKm) || 5, 275);
+    return geoProject(place.lat, place.lng, center, displayRadius(radiusKm), mapExtent(mode));
   }
 
   // 외부 지도 SDK를 사용할 수 없는 도표 보기에서도 같은 확대·축소 버튼을 쓴다.
   function zoom(container, factor) {
     const svg = container && container.querySelector('svg');
     if (!svg) return;
-    const width = factor === 0 ? 600 : Math.max(150, Math.min(900, svg.viewBox.baseVal.width * factor));
-    svg.setAttribute('viewBox', `${300 - width / 2} ${300 - width / 2} ${width} ${width}`);
+    if (factor === 0) {
+      svg.setAttribute('viewBox', '0 0 600 600');
+      return;
+    }
+    const {x, y, width, height} = svg.viewBox.baseVal;
+    const size = Math.max(150, Math.min(900, width * factor));
+    svg.setAttribute('viewBox', `${x + (width - size) / 2} ${y + (height - size) / 2} ${size} ${size}`);
   }
 
-  global.SeoulCompassMap = { render, renderGeo, projectForSim, zoom };
+  global.SeoulCompassMap = {render, renderGeo, projectForSim, zoom, radiusRings, displayRadius, mapExtent};
 })(window);

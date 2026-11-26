@@ -52,6 +52,21 @@
     }
   }
 
+  function describeLandUse(evidence) {
+    if (!evidence) return '';
+    if (!evidence.types.length) {
+      return evidence.coverage_percent
+        ? `토지 이용을 알기에는 표본이 부족합니다. 자료 포함 범위 ${evidence.coverage_percent}%`
+        : '이 구역의 토지 이용을 서울시 자료에서 확인하지 못했습니다.';
+    }
+    const parts = evidence.types.map(item => `${item.name} ${item.percent}%`);
+    if (!evidence.types.some(item => item.name === '상업·업무지') && evidence.commercial_percent != null) {
+      parts.push(`상업·업무지 ${evidence.commercial_percent}%`);
+    }
+    return `10° 구역 토지 이용 표본 · ${parts.join(' · ')}`
+      + (evidence.coverage_percent < 100 ? ` (자료 포함 범위 ${evidence.coverage_percent}%)` : '');
+  }
+
   async function walkingDistance(button, result, leg) {
     button.disabled = true;
     result.textContent = '도보 경로를 확인하고 있습니다.';
@@ -81,6 +96,17 @@
     const headings = selected.map(row => `${row.heading}°`).join(', ');
     add(card, 'p', [review.base && `${review.base} 기준`, `반경 ${review.radius}km`,
       `선정 방향 ${selected.length}개${headings ? ` (${headings})` : ''}`].filter(Boolean).join(' · '));
+    if (review.land_use_source) {
+      const source = review.land_use_source;
+      const note = add(card, 'p', '토지 이용 비중은 서울시 자료가 있는 격자 표본에서 계산했습니다. ');
+      note.className = 'hint';
+      if (/^https:\/\//i.test(source.url || '')) {
+        const link = add(note, 'a', `${source.name} ${source.year}`);
+        link.href = source.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+      }
+    }
     const table = add(card, 'table');
     table.className = 'direction-table';
     const header = add(add(table, 'thead'), 'tr');
@@ -95,6 +121,8 @@
       const status = add(tr, 'td', label);
       if (row.status === 'selected') status.className = 'direction-selected';
       const detail = add(tr, 'td', directionReason(row, review));
+      const landUse = describeLandUse(row.land_use);
+      if (landUse) add(detail, 'div', landUse).className = 'direction-land-use';
       const summary = [row.place, row.leg_km != null ? `기준 구간 직선 ${row.leg_km}km`
         : row.distance_km != null ? `전체 직선 ${row.distance_km}km` : '',
         row.leg_minutes != null ? `구간 이동 추정 ${row.leg_minutes}분` : row.minutes != null && `예상 이동 ${row.minutes}분`];
@@ -120,7 +148,9 @@
     add(card, 'p', `직선 연결 ${route.distance}km · ${travel}`);
     const stops = add(card, 'ol');
     for (const stop of route.stops) {
-      add(stops, 'li', [stop.time, stop.name, stop.term && `(${stop.term})`].filter(Boolean).join(' '));
+      const item = add(stops, 'li', [stop.time, stop.name, stop.term && `(${stop.term})`].filter(Boolean).join(' '));
+      const evidence = window.SeoulRouteView.menuEvidence(stop);
+      if (evidence) add(item, 'div').innerHTML = evidence;
     }
   }
   for (const group of places) {
@@ -140,6 +170,8 @@
         title = add(item, 'span', place.name);
       }
       if (place.industry) add(item, 'small', ` · ${place.industry}`);
+      const evidence = window.SeoulRouteView.menuEvidence(place);
+      if (evidence) add(item, 'div').innerHTML = evidence;
       if (place.visit_warning) {
         title.classList.add('visit-warning');
         const warning = add(item, 'span', place.visit_warning.reason);

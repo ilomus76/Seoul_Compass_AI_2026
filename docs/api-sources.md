@@ -54,6 +54,7 @@ NTS_BUSINESS_API_KEY=발급받은_일반_인증키
 | 서비스 | 설정 | 앱에서 사용하는 정보 |
 |---|---|---|
 | 한국관광공사 국문 관광정보 서비스_GW `KorService2` | `TOUR_API_KEY` | `searchKeyword2`로 장소를 찾고 동일한 업소로 확인되면 `detailIntro2`의 공개 메뉴, 영업시간(`opentimefood`), 휴무(`restdatefood`)를 사용한다. |
+| 행정안전부 착한가격업소 현황 | 키 없이 공개 CSV | [공개 자료](https://www.data.go.kr/data/3045247/fileData.do)의 2026-09-30 서울 음식점 중 메뉴가 있는 1,428곳을 `data/public_menus_seoul.csv`에 저장했다. 상호, 주소, 업종과 등록 메뉴만 사용한다. 같은 지점 확인과 유사 업소 모델에 쓰며, 갱신 시 파일과 `backend/menu_model.py`의 자료 기준일을 함께 업데이트한다. |
 | TheSportsDB KBO 일정 | 공개 무료 기본값 사용. 계정별 키는 `SPORTSDB_API_KEY` | 요청 날짜와 앞뒤 하루의 경기, 구장, 시작 시각을 조회한다. 일정을 확인하지 못하면 KBO나 주최 측 홈페이지를 안내한다. |
 
 TourAPI 키는 서비스 활용신청 후 일반 인증키를 사용한다. 공개 메뉴가 없을 때는 장소 상세 링크와 제공된 전화번호로 확인할 수 있다. 취소·연기 또는 시작 시각이 확인되지 않은 경기에는 확정 관람 경로를 만들지 않는다. [한국관광공사 TourAPI](https://www.data.go.kr/data/15101578/openapi.do) · [TheSportsDB 일정 명세](https://api.thesportsdb.com/documentation) · [KBO 공식 경기 일정](https://www.koreabaseball.com/Schedule/Schedule.aspx)
@@ -66,3 +67,9 @@ TourAPI 키는 서비스 활용신청 후 일반 인증키를 사용한다. 공�
 | ODsay | `ODSAY_API_KEY` | 지하철·기차로 선택한 코스의 탑승 구간 선형을 조회한다. 현재 로컬 키 미설정 상태다. |
 
 순위 추천 단계는 이동시간 추정치를 사용한다. 지도에서 **선택 경로의 실제 길 조회**를 누르면 공급자가 제공한 구간을 실선으로 표시한다. [OSRM 공개 서비스](https://routing.openstreetmap.de/about.html) · [ODsay API 명세](https://lab.odsay.com/guide/releaseReference?platform=web) · [실제 선형 표시 기준](map-routing.md#43-이동수단별-실제-선형-표시)
+
+## 6. 방향별 토지 이용
+
+서울특별시가 공개한 `비오톱유형_평가도(2025년기준).zip`을 사용한다. 원본 도형을 위·경도 약 55m 간격의 유형 표본으로 변환한 `data/seoul_land_use_2025.json`을 앱에서 읽는다. 서울시 경계 밖이나 분류되지 않은 표본은 미확인으로 둔다. 출처는 앱 방향별 비교에 표시한다. [서울 열린데이터광장 OA-21145](https://data.seoul.go.kr/dataList/OA-21145/S/1/datasetView.do)
+
+원본 ZIP을 받은 후 프로젝트 루트에서 `python scripts/prepare_seoul_land_use.py <ZIP 경로> data/seoul_land_use_2025.json`을 실행하면 변환할 수 있다. 서버 실행에 별도 키는 필요하지 않다.

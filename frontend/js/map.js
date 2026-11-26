@@ -77,7 +77,7 @@
   let kakaoOverlays = [];
   let mapRevision = 0;
   let resizeObserver = null;
-  let radiusCircle = null;
+  let outerRadiusCircle = null;
   let renderedSearch = null;
   let fittedLevel = null;
   let markerInfo = null;
@@ -109,8 +109,78 @@
 
   function changeZoom(delta) {
     if (!kakaoMap) return false;
-    kakaoMap.setLevel(Math.max(1, Math.min(14, kakaoMap.getLevel() + delta)));
+    const current = kakaoMap.getLevel();
+    const next = Math.max(1, Math.min(14, current + delta));
+    if (next !== current) {
+      fittedLevel = null;
+      kakaoMap.setLevel(next);
+    }
     return true;
+  }
+
+  // 두 손가락 간격이 1.25배씩 바뀔 때마다 확대·축소 버튼과 같은 한 단계를 적용한다.
+  function bindPinchZoom(container, zoomStep) {
+    const pointers = new Map();
+    const span = () => {
+      const [a, b] = pointers.values();
+      return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    };
+    let lastSpan = 0;
+    let pinching = false;
+    let skipClick = false;
+    let mapGesture;
+    const capture = {capture:true};
+    container.addEventListener('pointerdown', event => {
+      if (!pointers.size) skipClick = false;
+      if (event.pointerType !== 'touch') return;
+      pointers.set(event.pointerId, event);
+      if (pointers.size !== 2) return;
+      lastSpan = span();
+      event.stopPropagation();
+      if (pinching) return;
+      pinching = skipClick = true;
+      if (kakaoMap) {
+        mapGesture = {map:kakaoMap, zoomable:kakaoMap.getZoomable(), draggable:kakaoMap.getDraggable()};
+        kakaoMap.setZoomable(false);
+        kakaoMap.setDraggable(false);
+      }
+    }, capture);
+    container.addEventListener('pointermove', event => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.set(event.pointerId, event);
+      if (pinching) event.stopPropagation();
+      if (pointers.size !== 2) return;
+      const distance = span();
+      if (!distance || !lastSpan) {
+        lastSpan = distance;
+        return;
+      }
+      const ratio = distance / lastSpan;
+      const steps = Math.log(ratio) / Math.log(1.25);
+      const levels = Math.sign(steps) * Math.floor(Math.abs(steps) + 1e-9);
+      if (levels) {
+        zoomStep(-levels);
+        lastSpan *= 1.25 ** levels;
+      }
+    }, capture);
+    const end = event => {
+      if (!pointers.delete(event.pointerId)) return;
+      lastSpan = pointers.size === 2 ? span() : 0;
+      if (pointers.size || !pinching) return;
+      pinching = false;
+      if (mapGesture?.map && mapGesture.map === kakaoMap) {
+        kakaoMap.setZoomable(mapGesture.zoomable);
+        kakaoMap.setDraggable(mapGesture.draggable);
+      }
+      mapGesture = null;
+    };
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => container.addEventListener(type, end, capture));
+    container.addEventListener('click', event => {
+      if (!skipClick || event.detail === 0) return;
+      skipClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, capture);
   }
 
   function resetZoom() {
@@ -173,16 +243,16 @@
     kakaoOverlays.forEach(o => o.setMap(null));
     kakaoOverlays = [];
     kakaoMap = null;
-    radiusCircle = null;
+    outerRadiusCircle = null;
     renderedSearch = null;
     fittedLevel = null;
   }
 
-  // 선택한 반경 전체를 여백과 함께 표시한다. 화면 크기가 바뀌어도 원을 유지한다.
+  // 바깥쪽 반경 원까지 여백을 두고 표시한다.
   function fitSearchRadius() {
-    if (!kakaoMap || !radiusCircle) return;
+    if (!kakaoMap || !outerRadiusCircle) return;
     kakaoMap.relayout();
-    kakaoMap.setBounds(radiusCircle.getBounds(), 48, 48, 48, 48);
+    kakaoMap.setBounds(outerRadiusCircle.getBounds(), 48, 48, 48, 48);
     fittedLevel = kakaoMap.getLevel();
   }
 
@@ -226,6 +296,7 @@
     const lat = Number(center.latitude) || 37.5665;
     const lng = Number(center.longitude) || 126.9780;
     const radius = Number(data.radius_km) || 5;
+    const {radiusRings, displayRadius} = global.SeoulCompassMap;
     const revision = ++mapRevision;
     loadScript(`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`)
       .then(() => {
@@ -273,22 +344,24 @@
               }
               const score = Number((data.scores || {})[name]) || 0;
               const sector = new km.Polygon({ path, strokeColor: sectorColors[i], strokeWeight: 1,
-                strokeOpacity: .35, fillColor: sectorColors[i], fillOpacity: .08 + Math.min(.35, score / 200), zIndex: 1 });
+                strokeOpacity: 0, fillColor: sectorColors[i], fillOpacity: .08 + Math.min(.35, score / 200), zIndex: 1 });
               sector.setMap(kakaoMap); kakaoOverlays.push(sector);
-              const label = new km.CustomOverlay({ position: destination(km, lat, lng, i * 45, radius * 1.10),
+              const label = new km.CustomOverlay({ position: destination(km, lat, lng, i * 45, displayRadius(radius) * 1.10),
                 content: `<span class="map-direction-label" translate="no">${labels[i]}</span>`,
                 xAnchor:.5, yAnchor:.5, zIndex:4 });
               label.setMap(kakaoMap); kakaoOverlays.push(label);
             });
-            // 빨간 테두리를 부채꼴보다 위에 그려 반경을 분명하게 표시한다.
-            const circle = new km.Circle({ center: pos, radius: radius * 1000,
-              strokeColor:'#E53935', strokeWeight: 3, strokeOpacity: 1, fillOpacity: 0, zIndex: 3 });
-            circle.setMap(kakaoMap); kakaoOverlays.push(circle);
-            radiusCircle = circle;
-            // 원 위쪽 테두리 안에 반경을 표시해 중심의 장소명을 가리지 않는다.
-            const radiusLabel = new km.CustomOverlay({ position: destination(km, lat, lng, 0, radius),
-              content: `<span class="map-radius-label">반경 ${radius}km</span>`, xAnchor:.5, yAnchor:0, zIndex:5 });
-            radiusLabel.setMap(kakaoMap); kakaoOverlays.push(radiusLabel);
+            // 반경을 공통 중심에서 작은 원부터 그려 마지막 원을 화면 맞춤에 사용한다.
+            for (const ring of radiusRings(radius)) {
+              const circle = new km.Circle({center:pos, radius:ring.km * 1000,
+                strokeColor:ring.color, strokeWeight:1, strokeStyle:'dot', strokeOpacity:1, fillOpacity:0, zIndex:3});
+              circle.setMap(kakaoMap); kakaoOverlays.push(circle);
+              outerRadiusCircle = circle;
+              const label = new km.CustomOverlay({position:destination(km, lat, lng, 0, ring.km),
+                content:`<span class="map-radius-label" style="color:${ring.color}">반경 ${ring.km}km</span>`,
+                xAnchor:.5, yAnchor:0, zIndex:5});
+              label.setMap(kakaoMap); kakaoOverlays.push(label);
+            }
             smallMarker(km, pos, '검색 기준점', '#E53935', 6);
             const departure = data.route_start;
             if (departure && (departure.latitude !== lat || departure.longitude !== lng)) {
@@ -332,5 +405,6 @@
     return true;
   }
 
-  global.SeoulMapHelper = { useCurrentLocation, watchPosition, stopWatch, screenToLatLng, ipFallback, useKakaoMap, clearKakaoMap, changeZoom, resetZoom };
+  global.SeoulMapHelper = {useCurrentLocation, watchPosition, stopWatch, screenToLatLng, ipFallback,
+    useKakaoMap, clearKakaoMap, changeZoom, resetZoom, bindPinchZoom};
 })(window);

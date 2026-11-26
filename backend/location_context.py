@@ -156,6 +156,35 @@ def resolve_place(name: str, hiking: bool = False, *, stadium_near: tuple[float,
         return sample_match
 
 
+def resolve_area(name: str, scope: str | None = None) -> Dict | None:
+    """행정구역 좌표는 주소 검색의 유일한 일치 결과로 확인한다."""
+    if not KAKAO_REST_API_KEY or not name.strip():
+        return None
+    query = f'{scope} {name}' if scope and not normalize_name(name).startswith(normalize_name(scope)) else name
+    params = urllib.parse.urlencode({'query': query, 'size': 10})
+    request = urllib.request.Request('https://dapi.kakao.com/v2/local/search/address.json?' + params,
+                                    headers={'Authorization': 'KakaoAK ' + KAKAO_REST_API_KEY})
+    wanted = normalize_name(name.split()[-1])
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            documents = json.load(response).get('documents', [])
+        matches = {}
+        for row in documents:
+            address = row['address_name']
+            district = normalize_name(address.split()[-1])
+            if (row.get('address_type') != 'REGION' or not within_region(address, scope)
+                    or wanted not in (district, re.sub(r'[동읍면리]$', '', district))):
+                continue
+            matches[address] = (float(row['y']), float(row['x']))
+        if len(matches) == 1:
+            address, (lat, lng) = next(iter(matches.items()))
+            return {'type': 'area', 'name': name, 'resolved_name': address, 'latitude': lat, 'longitude': lng,
+                    'address': address, 'source': 'kakao'}
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        pass
+    return None
+
+
 def apply_location_context(parsed: Dict, text: str, fallback: Dict | None = None,
                            fallback_radius: float | None = None) -> Dict:
     """해석한 기준점·출발지·반경을 분석 응답에 추가한다. 서울시청 대체는 하지 않는다."""

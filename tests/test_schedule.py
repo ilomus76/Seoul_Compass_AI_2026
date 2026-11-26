@@ -35,6 +35,54 @@ class ScheduleTests(unittest.TestCase):
         self.assertIn('주문 마감', availability_warning(food, None, 21 * 60)['reason'])
         self.assertIsNone(availability_warning(food, None, 20 * 60 + 55, 21 * 60 + 25))
 
+    def test_public_schedule_uses_the_requested_weekday_and_last_entry(self):
+        museum = {'operating_hours': {
+            'hours': '- 월요일~화요일/목요일~금요일/일요일 10:00~18:00 (입장 마감 17:30)'
+                     '- 수요일/토요일 10:00~21:00 (입장 마감 20:30)',
+            'holidays': '1월 1일 / 설·추석 당일',
+        }}
+        self.assertIsNone(availability_warning(museum, '2026-12-05', 19 * 60, 20 * 60))
+        self.assertIn('영업시간', availability_warning(museum, '2026-12-04', 19 * 60)['reason'])
+        self.assertIn('입장 마감', availability_warning(museum, '2026-12-05', 20 * 60 + 30)['reason'])
+
+    def test_flexible_visit_waits_for_break_and_flags_late_fixed_game(self):
+        activities = [
+            {'id': 1, 'category': 'restaurant', 'preferred_time': '12:45', 'duration_minutes': 45},
+            {'id': 2, 'category': 'baseball_game', 'start_time': '14:00', 'duration_minutes': 150,
+             'fixed_time': True, 'official_event_time': True},
+        ]
+        restaurant = {'name': '식당', 'operating_hours': {
+            'hours': '평일 18:00~23:00 / 주말 12:00~20:00 (브레이크타임 13:00~14:00) / 월요일 휴무',
+        }}
+        route = {'travel_date': '2026-12-05', 'nodes': [
+            {'place': restaurant}, {'place': {'name': '경기장'}, 'travel_minutes': 20, 'travel_source': 'osm'},
+        ]}
+        result = validate_schedule(activities, route)
+        meal, game = result['timeline']
+        self.assertTrue(meal['availability_checked'])
+        self.assertEqual((meal['estimated_start'], meal['estimated_end'], meal['opening_wait_minutes']),
+                         ('14:00', '14:45', 75))
+        self.assertEqual((game['planned_start'], game['arrival_time'], game['buffer_minutes'], game['travel_source']),
+                         ('14:00', '15:15', 10, 'osm'))
+        self.assertTrue(game['official_event_time'])
+        self.assertFalse(result['feasible'])
+        self.assertEqual(result['conflicts'][0]['shortage_minutes'], 75)
+        self.assertIn('정기 휴무', availability_warning(restaurant, '2026-12-07', None)['reason'])
+        self.assertIn('영업시간', availability_warning(restaurant, '2026-12-04', 14 * 60)['reason'])
+
+    def test_dated_flexible_visit_can_wait_for_opening_and_unknown_hours_stay_unconfirmed(self):
+        activities = [{'id': 1, 'category': 'shopping'}, {'id': 2, 'category': 'restaurant'}]
+        route = {'travel_date': '2026-12-05', 'nodes': [
+            {'place': {'operating_hours': {'hours': '평일 09:00~18:00 / 주말 11:00~20:00'}}},
+            {'place': {'operating_hours': {'hours': '점포 별로 상이함'}}, 'travel_minutes': 20},
+        ]}
+        result = validate_schedule(activities, route)
+        shopping, restaurant = result['timeline']
+        self.assertEqual((shopping['estimated_start'], restaurant['arrival_time']), ('11:00', '12:30'))
+        self.assertTrue(shopping['availability_checked'])
+        self.assertFalse(restaurant['availability_checked'])
+        self.assertIsNone(restaurant['visit_warning'])
+
 
 if __name__ == "__main__":
     unittest.main()

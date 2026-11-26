@@ -5,12 +5,22 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[c]);
 
-  // 알려진 출발지는 별도로 표시하고, 모든 방문점에 분석한 원래 요청 표현을 연결한다.
-  function stopLabels(route, start, requestText) {
+  const activityNames = {cinema:'영화 관람', amusement:'놀이시설', baseball_game:'야구 경기 관람',
+    baseball_event:'야구 행사 관람', return_to_current:'현재 위치 복귀', return_to_start:'출발지 복귀',
+    return_home:'귀가', destination:'목적지 도착', pub:'술자리', other:'기타 활동'};
+
+  // 장소의 업종과 달라도 질문에서 분석한 활동을 표시한다.
+  function stopLabels(route, {start, requestText, activities = []} = {}) {
     start = route.start_location || start;
-    const labels = route.nodes.map(node => {
-      const term = node.request_term;
-      return `${node.place.name}${term ? `(${term})` : ''}`;
+    const labels = route.nodes.map((node, i) => {
+      const activity = activities[i];
+      const term = (node.request_term || activity?.request_term || activity?.keyword || '').trim();
+      const category = activity?.category || route.schedule?.timeline?.[i]?.category;
+      const recognized = category === 'other' && activity?.venue_kind
+        ? activity.venue_kind.trim()
+        : activityNames[category] || global.SeoulCharts?.NAMES_KO?.[category];
+      const detail = [term, recognized && recognized !== term ? recognized : ''].filter(Boolean).join(' · ');
+      return `${node.place.name}${detail ? `(${detail})` : ''}`;
     });
     const first = global.SeoulJourney.nodePoint(route.nodes[0]);
     if (!route.preview && start?.name && start.latitude != null && start.longitude != null && first
@@ -22,30 +32,7 @@
     return labels;
   }
 
-  function render(container, routes, onSelect) {
-    if (!container) return;
-    if (!routes || !routes.length) {
-      container.innerHTML = '<p>추천 경로가 없습니다. 질문에 장소 조건을 포함해 주세요.</p>';
-      return;
-    }
-    const accents = global.SeoulJourney.ROUTE_COLORS;
-    container.innerHTML = routes.map((r, i) => {
-      const names = stopLabels(r).join(' → ');
-      const conflict = r.schedule && r.schedule.conflicts && r.schedule.conflicts.length;
-      return `<article class="route-card" data-index="${i}" style="--card-accent:${accents[i % accents.length]}">
-        <h3><span class="rank">${i + 1}</span> ${r.preview ? '후보 동선' : r.verification_status === 'unverified' ? '검토용 일정' : `${esc(r.direction)} 방향 · ${r.score}점`}</h3>
-        <p>${esc(names)}</p>
-        <p>직선 연결 ${r.total_distance_km}km · ${r.preview ? '출발 구간 미포함' : `이동 추정 ${r.total_travel_minutes}분 · 비용 ${r.estimated_cost_krw == null ? '확인 필요' : r.estimated_cost_krw + '원'}`}</p>
-        <p>${r.verification_status === 'unverified' ? '영업시간·산행 코스·실제 이동 경로 미검증' : `신뢰도 ${Math.round((r.data_confidence || 0) * 100)}%`} ${conflict ? '· 일정 충돌 있음' : ''}</p>
-        <button type="button" class="ghost select-route">이 경로 선택</button>
-      </article>`;
-    }).join('');
-    container.querySelectorAll('.select-route').forEach((btn) => {
-      btn.addEventListener('click', () => onSelect(routes[Number(btn.parentElement.dataset.index)]));
-    });
-  }
-
-  function recommendationList(routes, selected, regionIndex, start, requestText) {
+  function recommendationList(routes, selected, regionIndex, context, expanded) {
     if (!routes.length) return '<p class="hint">표시할 추천 경로가 없습니다.</p>';
     const shortest = Math.min(...routes.map(r => Number(r.total_distance_km)));
     const quickest = Math.min(...routes.filter(r => r.total_travel_minutes != null).map(r => r.total_travel_minutes));
@@ -71,12 +58,14 @@
       if (confirmed.length) reasons.push(`요청 메뉴 공개 정보 확인 ${confirmed.length}곳`);
       if (r.nodes.some(node => node.place.menu_status === 'unconfirmed')) reasons.push('요청 메뉴 확인 필요');
       if (r.nodes.some(node => node.place.venue_condition_unconfirmed)) reasons.push('장소의 세부 조건 확인 필요');
-      const places = stopLabels(r, start, requestText).map(esc).join(' → ');
+      const places = stopLabels(r, context).map(esc).join(' → ');
+      const open = r === expanded;
       return `<li style="--recommendation-color:${color}">
-        <button type="button" class="select-recommendation" data-region="${regionIndex}" data-route="${i}" aria-pressed="${r === selected}">
-          <strong>추천 ${i + 1}]</strong> <span>${reasons.map(esc).join(' · ')}</span>
+        <button type="button" class="select-recommendation" data-region="${regionIndex}" data-route="${i}" aria-pressed="${r === selected}" aria-expanded="${open}">
+          <strong>추천 ${i + 1}]</strong>
           <small>${places}</small>
-        </button></li>`;
+        </button>
+        ${open ? routeDetails(r, reasons) : ''}</li>`;
     }).join('')}</ol>`;
   }
 
@@ -108,33 +97,74 @@
     return `<span class="visit-warning visit-warning-detail">${esc(warning.reason)}${link}</span>`;
   }
 
-  function referenceCourse(route, selected, regionIndex, start, routeIndex = 0) {
+  function menuEvidence(place) {
+    const matches = place.menu_evidence || [];
+    const model = place.menu_model;
+    if (!matches.length && !model) return '';
+    const rows = matches.map(row => {
+      const source = /^https:\/\//i.test(row.source_url || '')
+        ? `<a href="${esc(row.source_url)}" target="_blank" rel="noopener noreferrer">${esc(row.source)}</a>`
+        : esc(row.source);
+      return `<li>${esc(row.menu)} · ${source}${row.published_date ? ` · ${esc(row.published_date)} 기준` : ''}</li>`;
+    }).join('');
+    const hints = [];
+    if (place.menu_status !== 'matched') {
+      if (place.menu_match_hint) hints.push('상호·업종에 메뉴 단서 있음');
+      if (model?.supporting_neighbors) hints.push(`유사 업소 공개 메뉴 관련도 ${esc(model.relatedness)}점`);
+      hints.push('요청 메뉴 판매 확인 필요');
+    }
+    return `<div class="menu-evidence">${rows ? `<strong>공개 메뉴 근거</strong><ul>${rows}</ul>` : ''}
+      ${hints.length ? `<span>${hints.join(' · ')}</span>` : ''}</div>`;
+  }
+
+  function referenceCourse(route, selected, regionIndex, context, routeIndex = 0, expanded) {
     if (!route) return '';
-    const places = stopLabels(route, start);
+    const places = stopLabels(route, context);
     const offset = places.length - route.nodes.length;
     const stops = places.map((name, i) => route.nodes[i - offset]?.place.visit_warning
       ? `<strong class="visit-warning">${esc(name)}</strong>` : esc(name));
     const color = global.SeoulJourney.routeColor(route, routeIndex);
     const direction = Number.isFinite(route.reference_heading)
-      ? ` · ${esc(route.reference_direction)} ${route.reference_heading}°` : '';
+      ? `${route.reference_direction} ${route.reference_heading}°` : '';
+    const open = route === expanded;
+    const reasons = [`직선 연결 ${route.total_distance_km}km`, direction,
+      route.partial ? '확인된 구간까지 표시' : '',
+      route.preview ? '현재 위치 적용 후 출발·복귀 계산' : '',
+      '빨간 장소의 방문 조건을 확인해 주세요.'].filter(Boolean);
     return `<div class="reference-course" style="--reference-color:${color}">
-      <button class="ghost select-reference" type="button" data-region="${regionIndex}" data-route="${routeIndex}" aria-pressed="${route === selected}">참고 ${routeIndex + 1}${direction}</button>
-      <p>${stops.join(' → ')}</p>
-      <p>${route.partial ? '확인된 구간까지 표시 · ' : ''}${route.preview ? '현재 위치 적용 후 출발·복귀 계산 · ' : ''}빨간 장소의 방문 조건을 확인해 주세요.</p>
+      <button class="select-reference" type="button" data-region="${regionIndex}" data-route="${routeIndex}" aria-pressed="${route === selected}" aria-expanded="${open}">
+        <strong>참고 ${routeIndex + 1}]</strong>
+        <small>${stops.join(' → ')}</small>
+      </button>
+      ${open ? routeDetails(route, reasons) : ''}
     </div>`;
   }
 
-  function venueDetails(route) {
-    const venues = route?.nodes.map(node => node.place).filter(place =>
-      !place.food_options?.length && (place.merchant || place.menu_status || place.phone || place.place_url)) || [];
-    if (!venues.length) return '';
-    return `<div class="market-food-options"><strong>선택 코스 장소 정보</strong><ul>${venues.map(place => {
-      const title = visitPlaceLink(place);
-      const menus = place.menus?.length ? ` · ${esc(place.menus.join(' / '))} (${esc(place.menu_source)})` : '';
-      const check = ['unconfirmed', 'unavailable'].includes(place.menu_status) ? ' · 메뉴 확인 필요' : '';
+  function routeDetails(route, reasons) {
+    const timeline = route.schedule?.timeline || [];
+    const visits = route.nodes.map(({place}, i) => {
+      const time = timeline[i];
+      const timing = time ? `<time>${esc(time.estimated_start)}–${esc(time.estimated_end)}</time> ` : '';
+      const evidence = menuEvidence(place);
+      const menus = !place.menu_evidence?.length && place.menus?.length ? ` · ${esc(place.menus.join(' / '))} (${esc(place.menu_source)})` : '';
+      const check = !evidence && ['unconfirmed', 'unavailable'].includes(place.menu_status) ? ' · 메뉴 확인 필요' : '';
       const industry = place.merchant?.industry ? ` · ${esc(place.merchant.industry)} (상권정보)` : '';
-      return `<li>${title}${industry}${menus}${check}${venuePhone(place.phone)}</li>`;
-    }).join('')}</ul></div>`;
+      const hours = place.operating_hours ? ` · ${esc(operatingHours(place))}` : '';
+      const nearby = place.food_options?.map(food => `<li>${visitPlaceLink(food)}${food.menus?.length
+        ? ` · ${esc(food.menus.join(' / '))} (${esc(food.menu_source)})`
+        : food.menu_hint ? ` · ${esc(food.menu_hint)}` : ''}${venuePhone(food.phone)}${menuEvidence(food)}</li>`).join('');
+      return `<li>${timing}${visitPlaceLink(place)}${industry}${menus}${check}${hours}${venuePhone(place.phone)}
+        ${visitWarning(time?.visit_warning || place.visit_warning)}${evidence}
+        ${nearby ? `<div>주변 먹거리 · 운영시간 확인 필요<ul>${nearby}</ul></div>` : ''}</li>`;
+    }).join('');
+    const conflicts = route.schedule?.conflicts?.map(c =>
+      `<li>${esc(c.reason)}${c.shortage_minutes ? ` · ${esc(c.shortage_minutes)}분 초과` : ''}</li>`).join('');
+    const cautions = route.cautions?.map(note => `<li>${esc(note)}</li>`).join('');
+    const cost = route.preview ? '' : ` · 비용 ${route.estimated_cost_krw == null ? '확인 필요' : esc(route.estimated_cost_krw) + '원'}`;
+    return `<div class="recommendation-detail"><p>${reasons.map(esc).join(' · ')}${cost}</p>
+      <ol>${visits}</ol>
+      ${conflicts ? `<ul class="warn">${conflicts}</ul>` : ''}
+      ${cautions ? `<details><summary>방문 전 확인할 사항</summary><ul>${cautions}</ul></details>` : ''}</div>`;
   }
 
   function renderReport(container, data) {
@@ -170,6 +200,6 @@
       linkRows ? `<ul>${linkRows}</ul>` : ''}`;
   }
 
-  global.SeoulRouteView = {render, renderReport, recommendationList, renderEventNotice, venuePhone, venueDetails,
-    operatingHours, visitPlaceLink, visitWarning, referenceCourse};
+  global.SeoulRouteView = {renderReport, recommendationList, renderEventNotice, venuePhone,
+    operatingHours, visitPlaceLink, visitWarning, menuEvidence, referenceCourse};
 })(window);

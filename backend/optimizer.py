@@ -4,7 +4,8 @@ from typing import Dict, List
 from .direction import calculate_bearing, get_direction, haversine
 from .place_clusters import CANDIDATE_POOL_LIMIT, cluster_places
 from .places import find_by_keywords, search_places
-from .route_corridor import corridor_options, direction_rows, point_bearing, recommendation_rank, sector_heading
+from .route_corridor import (RECOMMENDATION_FACTORS, corridor_options, direction_rows, point_bearing,
+                             recommendation_rank, sector_heading)
 from .schedule import travel_minutes, validate_schedule
 from .scoring import normalize_weights, score_place
 
@@ -71,6 +72,11 @@ def select_reference_directions(beams: list[dict], index: int | None, center: di
         activity = activities[index]
         review.update(kind='reference', base=base, activity=activity.get('request_term') or activity.get('keyword') or activity['category'],
                       rows=direction_rows('missing_clusters'))
+        if len(origins) == 1:
+            point = origins[0]['center']
+            review['land_use_origin'] = {'latitude':point['lat'], 'longitude':point['lng']}
+        elif not index:
+            review['land_use_origin'] = center
         for origin in origins or [{'center': {'lat':center['latitude'], 'lng':center['longitude']}}]:
             pivot = {'latitude':origin['center']['lat'], 'longitude':origin['center']['lng']}
             for group in groups[index]:
@@ -107,8 +113,7 @@ def select_reference_directions(beams: list[dict], index: int | None, center: di
             row.update(status='duplicate_cluster')
             continue
         if len(selected) == TOP_N:
-            factors = ('일정 충돌 수', '이전 장소와 같은 주소', '겹치는 경유 구간', '요청 메뉴 일치',
-                       '장소의 세부 조건', '추정 이동시간', '직선 연결 거리', '방향 범위')
+            factors = ('일정 충돌 수', '이전 장소와 같은 주소', '겹치는 경유 구간', *RECOMMENDATION_FACTORS)
             candidate = reference_rank(beam, activities)
             cutoff = reference_rank(selected[-1], activities)
             driver = next((factor for factor, a, b in zip(factors, candidate, cutoff) if a != b), None)

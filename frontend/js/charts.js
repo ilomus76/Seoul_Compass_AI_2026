@@ -5,13 +5,13 @@
   // 절제된 라이트 톤: 골드·네이비·세이지 기반의 고급 팔레트
   const COLORS = {
     hiking:'#4f9d69', swimming:'#268bb5', shower:'#4a8fb8', meeting:'#c07a3c', restaurant:'#b45f54',
-    bowling:'#7d6bb5', international_tourism_area:'#2f8f83', subway_station:'#5479b0',
+    bowling:'#7d6bb5', karaoke:'#9b548e', international_tourism_area:'#2f8f83', subway_station:'#5479b0',
     shopping:'#b8914e', attraction:'#a86a8f', night_view:'#6b5ba8', park:'#5d9b6f',
     cafe:'#b8805e', culture:'#8a76ad', bar:'#a85a55', history_museum:'#6767a4',
     palace:'#a85a55', market_food:'#b8805e'
   };
   const SECTOR_COLORS = ['#b45f54','#c08a4a','#b8914e','#6f9b6a','#2f8f83','#5479b0','#6b5ba8','#9b6aa0'];
-  const NAMES_KO = { hiking:'등산', swimming:'수영', shower:'샤워', meeting:'약속', restaurant:'식사', bowling:'볼링',
+  const NAMES_KO = { hiking:'등산', swimming:'수영', shower:'샤워', meeting:'약속', restaurant:'식사', bowling:'볼링', karaoke:'노래방',
     international_tourism_area:'국제관광', subway_station:'지하철', shopping:'쇼핑', attraction:'명소',
     night_view:'야경', park:'공원', cafe:'카페', culture:'문화', bar:'주점',
     history_museum:'역사 박물관', palace:'고궁', market_food:'시장 먹거리' };

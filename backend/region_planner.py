@@ -10,14 +10,17 @@ from typing import Dict, List
 
 from .config import KAKAO_REST_API_KEY, SBDC_API_KEY
 from .direction import haversine, calculate_bearing, get_direction
+from .direction_context import annotate_land_use
 from .location_context import normalize_name, resolve_place, within_region
 from .merchant_catalog import industry_match, merge_merchants, search_merchants
+from .menu_model import address_key, known_menu_shops, menu_rank
 from .optimizer import recommend_routes
 from .places import load_places
 from .place_clusters import CANDIDATE_POOL_LIMIT, cluster_places
-from .route_corridor import HEADINGS, direction_rows, recommendation_rank, sector_heading, unique_courses
+from .route_corridor import (HEADINGS, RECOMMENDATION_FACTORS, direction_rows, recommendation_rank,
+                             sector_heading, unique_courses)
 from .schedule import availability_warning, to_minutes, to_clock, travel_minutes
-from .venue_details import annotate_menus, name_key
+from .venue_details import annotate_menus, annotate_operating_hours, name_key
 
 # 좌표나 시설을 만들지 않고, 이 이름으로 API에 존재하는 입구를 조회한다.
 MOUNTAIN_QUERIES = ['관악산', '북한산', '아차산', '인왕산', '불암산']
@@ -53,7 +56,7 @@ def search_live(query: str, center: Dict | None = None, radius_km: float = 5,
         places = []
         for p in documents:
             address = p.get('road_address_name') or p.get('address_name', '')
-            if not within_region(address, region_scope):
+            if not within_region(address, region_scope) and not within_region(p.get('address_name') or '', region_scope):
                 continue
             lat, lng = float(p['y']), float(p['x'])
             if not (33 <= lat <= 39 and 124 <= lng <= 132):
@@ -203,7 +206,8 @@ def markets_with_food(markets: List[Dict], region_scope: str | None, terms: list
         if terms:
             by_id = {p['id']: p for p in shops}
             detailed = annotate_menus([by_id[option['id']] for option in preferred[:3]], terms)
-            result['food_options'] = [{**option, **{key: shop[key] for key in ('menus', 'menu_status', 'menu_source')}}
+            result['food_options'] = [{**option, **{key: shop.get(key) for key in (
+                'menus', 'menu_status', 'menu_source', 'menu_evidence', 'menu_model', 'menu_match_hint')}}
                                       for option, shop in zip(preferred, detailed)]
             result['menu_status'] = 'matched' if any(shop['menu_status'] == 'matched' for shop in detailed) else 'unconfirmed'
         return result
@@ -237,12 +241,14 @@ def discover_anchors() -> List[Dict]:
 
 CONTEXT_QUERIES = {**ACTIVITY_QUERIES, 'baseball_game': '야구장', 'baseball_event': '야구장',
                    'history_museum': '역사박물관', 'palace': '고궁',
-                   'market_food': '전통시장', 'cinema': '영화관', 'amusement': '놀이공원', 'hiking': '등산로 입구'}
+                   'market_food': '전통시장', 'cinema': '영화관', 'amusement': '놀이공원',
+                   'hiking': '등산로 입구', 'karaoke': '노래방'}
 VENUE_TYPES = {'hiking': ('등산로', '산', '산입구'), 'shopping': ('백화점', '쇼핑센터', '아울렛', '복합쇼핑몰', '쇼핑'),
                'cinema': ('영화관', '극장'), 'amusement': ('놀이공원', '테마파크', '키즈카페', '워터파크'),
                'culture': ('박물관', '미술관', '전시관', '문화시설', '공연장'),
                'palace': ('고궁', '궁'), 'shower': ('목욕탕', '사우나', '찜질방'),
-               'bar': ('술집', '주점', '호프', '바'), 'night_view': ('전망대', '전망시설')}
+               'bar': ('술집', '주점', '호프', '바'), 'night_view': ('전망대', '전망시설'),
+               'karaoke': ('노래방', '코인노래방', '노래연습장', '코인노래연습장')}
 
 
 def context_matches(place: dict, activity: dict) -> bool:
@@ -284,6 +290,25 @@ def fixed_candidate(activity: dict, existing: list, center: dict, radius: float,
              'lat': lat, 'lng': lng, 'address': location.get('address'), 'source': 'kakao',
              'place_url': location.get('place_url'), 'phone': location.get('phone'),
              'category': activity['category'], 'distance_km': round(distance, 3)}]
+
+
+def search_listed_menus(center: dict, radius: float, scope: str | None, terms: list[str]) -> list[dict]:
+    """공개 목록의 메뉴를 역검색하되 상호·주소·반경이 검증된 곳만 추가한다."""
+    entries = known_menu_shops(terms, center.get('address') or '')[:8]
+    if not KAKAO_REST_API_KEY or not entries:
+        return []
+
+    def lookup(entry):
+        title, road = entry
+        try:
+            places = search_live(title, center, radius, region_scope=scope)
+        except RuntimeError:
+            return None
+        return next((place for place in places
+                     if name_key(place['name']) == name_key(title) and address_key(place['address']) == road), None)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        return [place for place in executor.map(lookup, entries) if place]
 
 
 def context_candidates(center: dict | None, activity: dict, radius: float, scope: str | None,
@@ -330,6 +355,9 @@ def context_candidates(center: dict | None, activity: dict, radius: float, scope
                               for place in lookup(venue_query, extra_distance=True)]
             except RuntimeError as error:
                 kakao_error = error
+        if center and terms and category in ('restaurant', 'cafe', 'bar'):
+            candidates.extend({**place, 'category': category}
+                              for place in search_listed_menus(center, radius, scope, terms))
         candidates = list({place['id']: place for place in candidates}.values())
         if center and industries and category not in ('baseball_game', 'baseball_event', 'history_museum', 'palace', 'market_food'):
             try:
@@ -346,7 +374,11 @@ def context_candidates(center: dict | None, activity: dict, radius: float, scope
             raise kakao_error
     if category == 'market_food':
         return markets_with_food(candidates, scope, terms)
-    return annotate_menus(candidates, terms) if category in ('restaurant', 'cafe', 'bar') else candidates
+    if category in ('restaurant', 'cafe', 'bar'):
+        candidates = annotate_menus(candidates, terms, limit=8 if terms else 5)
+        if terms:
+            return sorted(candidates, key=lambda place: (*menu_rank(place), place.get('distance_km', 0)))[:CANDIDATE_POOL_LIMIT]
+    return annotate_operating_hours(candidates, category)
 
 
 def recommend_regions(request: Dict) -> Dict:
@@ -356,7 +388,8 @@ def recommend_regions(request: Dict) -> Dict:
     contextual = request.get('contextual', False)
     scope = request.get('region_scope')
     radius = request.get('radius_km', 5)
-    existing = [explicit_center, request.get('start_location'), request.get('route_goal')]
+    existing = [explicit_center, request.get('start_location'), request.get('route_goal'),
+                *(activity.get('search_anchor') for activity in activities)]
     return_location = request.get('return_location')
     if return_location and any(return_location.get(key) is None for key in ('latitude', 'longitude')):
         return_location = None
@@ -402,7 +435,8 @@ def recommend_regions(request: Dict) -> Dict:
     except RuntimeError as error:
         return {'regions': [], 'warnings': [str(error)], 'note': '실제 장소 조회 실패'}
     def evaluate(anchor):
-        center = {'lat': explicit_center['latitude'], 'lng': explicit_center['longitude']} if explicit_center else anchor
+        center = {'lat': explicit_center['latitude'], 'lng': explicit_center['longitude'],
+                  'address': explicit_center.get('address')} if explicit_center else anchor
         first_is_anchor = (not explicit_center or (not contextual and first_category == 'hiking'))
         groups = [[anchor]] if first_is_anchor else []
         search_center = explicit_center or {'type': 'region_candidate', 'name': anchor['name'],
@@ -421,13 +455,23 @@ def recommend_regions(request: Dict) -> Dict:
             issues.append('API 키가 없어 데모 데이터만 비교했습니다.')
         if not contextual and explicit_center and activities[0]['category'] == 'hiking' and not anchor.get('entry_confirmed'):
             issues.append('산의 위치만 확인했습니다. 실제 등산로 입구 선택이 필요합니다.')
+        current_anchor = center
+        search_anchors = {(center['lat'], center['lng']):search_center}
+        last_anchor_index = 0
         for index, activity in enumerate(activities[len(groups):], start=len(groups)):
             try:
                 if contextual:
+                    local = activity.get('search_anchor')
+                    if local and local.get('latitude') is not None and local.get('longitude') is not None:
+                        lat, lng = local['latitude'], local['longitude']
+                        current_anchor = {'lat':lat, 'lng':lng, 'address':local.get('address')}
+                        search_anchors[(lat, lng)] = local
+                        last_anchor_index = index
+                    local_scope = local['address'] if local and local.get('type') == 'area' and local.get('address') and not activity.get('fixed_location') else scope
                     # 관람 일정 미확인 시 구장 안 매장과 주변 업소를 함께 비교한다.
                     event_meal = (activity['category'] == 'restaurant' and index > 0
                                   and bool(activities[index - 1].get('visit_warning')))
-                    places = context_candidates(center, activity, radius, scope, start, existing, return_location,
+                    places = context_candidates(current_anchor, activity, radius, local_scope, start, existing, return_location,
                                                include_venue_query=event_meal)
                 elif explicit_center and activity.get('fixed_location') and activity.get('location') == explicit_center.get('name'):
                     places = [{**anchor, 'category': activity['category']}]
@@ -440,7 +484,7 @@ def recommend_regions(request: Dict) -> Dict:
                 issues.append(str(error))
             groups.append(places)
         for index, (activity, places) in enumerate(zip(activities, groups)):
-            start_minute = to_minutes(activity.get('start_time'))
+            start_minute = to_minutes(activity.get('start_time')) if activity.get('fixed_time') else None
             duration = activity.get('duration_minutes')
             end_minute = start_minute + duration if start_minute is not None and duration is not None else None
             checked = []
@@ -480,6 +524,12 @@ def recommend_regions(request: Dict) -> Dict:
                          'search_center': search_center}
         base_name = ('출발지' if comparison_start.get('type') in ('current_location', 'custom', 'map')
                      else comparison_start.get('name') or search_center['name'])
+        if len(search_anchors) > 1:
+            direction_center = next(reversed(search_anchors.values()))
+            direction_activity_id = next((a['id'] for a in reversed(activities[last_anchor_index:])
+                                          if not a.get('fixed_location') and a['category'] not in ('return_to_start', 'return_to_current')), None)
+            route_request.update(direction_center=direction_center, direction_activity_id=direction_activity_id)
+            base_name = direction_center['name']
         recommendation_review = {'base': base_name}
         if contextual and missing:
             requested = request.get('requested_bearing')
@@ -511,11 +561,14 @@ def recommend_regions(request: Dict) -> Dict:
         draft = routes[0] if routes and not needs_origin else None
         for route in routes + references:
             route_issues = list(issues)
-            for activity, node in zip(activities, route['nodes']):
+            timeline = (route['schedule'] or {}).get('timeline', [])
+            for index, (activity, node) in enumerate(zip(activities, route['nodes'])):
                 place = node['place']
                 if place.get('visit_warning'):
                     route_issues.append(f"{place['name']}: {place['visit_warning']['reason']}")
-                elif not place.get('operating_hours') and activity['category'] not in ('return_to_start', 'return_to_current'):
+                elif (not activity.get('official_event_time')
+                      and not (timeline and timeline[index]['availability_checked'])
+                      and activity['category'] not in ('return_to_start', 'return_to_current')):
                     route_issues.append(f"{place['name']}: 방문일 영업시간·이용 가능 여부 확인 필요")
                 if activity['category'] == 'swimming':
                     route_issues.append(f"{place['name']}: 자유수영 시간·입장 조건·환복시간 확인 필요")
@@ -549,8 +602,11 @@ def recommend_regions(request: Dict) -> Dict:
         for place in flat.values():
             place['bearing'] = calculate_bearing(center['lat'], center['lng'], place['lat'], place['lng'])
             place['direction'] = get_direction(place['bearing'])
+        annotate_land_use(recommendation_review, route_request.get('direction_center') or comparison_start, radius)
+        annotate_land_use(reference_review, reference_review.pop('land_use_origin', None), radius)
         return {'id': anchor['id'], 'name': anchor.get('region_name', anchor['name']),
                 'search_center': search_center, 'start_location': start,
+                'search_anchors': list(search_anchors.values()),
                 'first_leg': first_leg,
                 'evaluated_activities': plan_activities,
                 'coverage_percent': round(covered / len(activities) * 100), 'missing_activities': missing,
@@ -581,8 +637,7 @@ def recommend_regions(request: Dict) -> Dict:
                     row.update(status='selected' if rank is not None and rank <= 5 else 'rank_limit' if rank is not None else 'duplicate_route',
                                rank=rank, distance_km=route['total_distance_km'], minutes=route['total_travel_minutes'])
                     if rank is not None and rank > 5:
-                        factors = ('요청 메뉴 일치', '장소의 세부 조건', '추정 이동시간', '직선 연결 거리', '방향 범위')
-                        row['factor'] = next((name for name, a, b in zip(factors, recommendation_rank(route),
+                        row['factor'] = next((name for name, a, b in zip(RECOMMENDATION_FACTORS, recommendation_rank(route),
                                                                        recommendation_rank(recommendations[-1])) if a != b), None)
             region['routes'] = [route for route in recommendations if route['region_id'] == region['id']]
             region['draft_route'] = next((route for route in region['routes'] if not route.get('preview')), None)

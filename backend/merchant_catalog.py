@@ -80,7 +80,8 @@ def search_merchants(center: dict, radius: float, scope: str | None, terms: list
     for code in codes:
         for row in merchants_in_box(round(lat, 5), round(lng, 5), radius, code, int(monotonic() // 600)):
             address = row.get('rdnmAdr') or row.get('lnoAdr') or ''
-            if not address or not within_region(address, scope) or not row.get('bizesId') or not row.get('bizesNm'):
+            if (not address or not (within_region(address, scope) or within_region(row.get('lnoAdr') or '', scope))
+                    or not row.get('bizesId') or not row.get('bizesNm')):
                 continue
             try:
                 y, x = float(row['lat']), float(row['lon'])

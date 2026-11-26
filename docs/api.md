@@ -61,6 +61,7 @@
 - `/api/regions/recommend`에 `contextual: true`, `requested_bearing`, `route_goal`을 전달하면 전체 `recommendations`를 최대 5개 반환합니다. `alternative_routes`에는 다음 순위 코스를 제공합니다. `scanned_headings`는 전체 방향 36 또는 지정 방향 1, `direction_candidate_count`는 중복 제거 후 전체 수입니다. `corridor.variant`는 `primary` 또는 `adjacent`, `corridor.sectors`는 사용한 10° 구역 목록입니다. 방향과 시간이 함께 맞지 않는 지역에는 `no_corridor`를 표시합니다.
 - `merchant_lookup`으로 상권정보 연동 상태를 표시합니다. `matched`는 공공 업종 데이터 포함, `unconfigured`는 키 미설정, `unconfirmed`는 공개 업종 미확인입니다. 상권정보 업체의 `merchant`에는 공공 상가업소 식별자와 상권·표준산업 분류가 있습니다.
 - 음식점 후보의 `menus`, `menu_source`, `matched_menu_terms`, `menu_status`로 공개 메뉴와 확인 상태를 구별합니다. `matched`는 요청 메뉴가 공개 정보에서 확인된 경우, `unconfirmed`는 요청 메뉴 확인 필요, `published`는 공개 메뉴 있음, `unavailable`은 공개 메뉴 미확인입니다.
+- 메뉴 조건이 있으면 `menu_evidence`에 해당 업소의 일치 메뉴 원문, 연결된 요청 메뉴(`terms`), 출처, 기준일을 반환합니다. `menu_model.relatedness`는 유사 업소의 공개 메뉴를 이용한 0~100 관련도이고 `supporting_neighbors`는 요청 메뉴와 일치한 이웃 수입니다. 공개 메뉴 근거가 있는 후보를 먼저 비교하고, 모델은 추정 후보 순서를 보완합니다.
 
 ## 야구 일정 조회와 홈페이지 안내
 
@@ -70,3 +71,4 @@
 - `/api/regions/recommend`의 지역별 `reference_routes`는 서로 다른 방향의 참고 동선을 최대 5개 제공합니다. 순위는 `reference_rank`, 방위각과 방향명은 `reference_heading`, `reference_direction`입니다. 기존 `reference_route`는 목록의 첫 동선을 제공합니다. 관련 장소는 `places[].visit_warning`에 사유·출처와 함께 표시되며, 확인 가능한 연속 구간만 제공할 때 해당 동선의 `partial`이 `true`입니다. 일반 추천 순위는 기존 `recommendations`에서 제공합니다.
 - `operating_hours`는 동일 장소로 확인된 공개 운영시간·휴무 안내입니다. 운영시간과 일정 충돌이 확인되면 `/api/schedule/validate`의 `timeline[].visit_warning`과 `conflicts[].kind: visit_unavailable`로 확인할 수 있습니다.
 - `/api/regions/recommend`의 `regions[].direction_reviews`는 기준점과 10° 구역별 상태, 순위, 확인된 비교 항목을 제공합니다. 공개 장소 간 `walking_leg`가 있으면 방향 결과 페이지에서 기존 `/api/routes/network`로 도보 거리를 조회할 수 있습니다.
+- 후보가 부족한 구역의 `land_use`에는 서울시 자료 포함 비율(`coverage_percent`), 주요 유형별 표본 비중(`types`) 및 상업·업무지 비중(`commercial_percent`)이 있습니다. 출처는 비교 결과의 `land_use_source`에 나옵니다. 표본이 부족하면 유형 목록이 비어 있습니다.

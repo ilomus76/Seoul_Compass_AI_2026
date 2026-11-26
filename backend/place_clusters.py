@@ -1,5 +1,6 @@
 """같은 활동의 장소를 반경 50m의 군집으로 묶는다."""
 from .direction import haversine
+from .menu_model import menu_rank
 
 CLUSTER_RADIUS_KM = .05
 CANDIDATE_POOL_LIMIT = 15
@@ -35,7 +36,9 @@ def cluster_places(places: list[dict]) -> list[dict]:
         center = group['center']
         members = group.pop('members')
         group.update(
-            representative=min(members, key=lambda p: (p.get('menu_status') != 'matched', distance(center, p))),
+            representative=min(members, key=lambda p: (*menu_rank(p),
+                                                       p.get('menu_status') == 'unconfirmed' and bool(p.get('venue_condition_unconfirmed')),
+                                                       distance(center, p))),
             place_ids=[p['id'] for p in members],
             size=len(members),
             radius_m=50,

@@ -5,6 +5,8 @@ from .direction import calculate_bearing, haversine
 
 HEADINGS = tuple(range(0, 360, 10))
 HALF_SECTOR = 5
+RECOMMENDATION_FACTORS = ('요청 메뉴 일치', '장소의 세부 조건', '유사 업소 공개 메뉴 관련도',
+                          '추정 이동시간', '직선 연결 거리', '방향 범위')
 
 
 def point_bearing(start: dict, point: dict) -> float | None:
@@ -25,16 +27,18 @@ def direction_rows(status: str) -> dict[int, dict]:
 def corridor_options(groups: list[list[dict]], activities: list[dict], request: dict,
                      find_courses: Callable, review: dict | None = None) -> list[dict]:
     start = request['start_location']
+    direction_center = request.get('direction_center')
     goal = request.get('route_goal')
     requested = request.get('requested_bearing')
     goal_axis = point_bearing(start, {'lat': goal['latitude'], 'lng': goal['longitude']}) if (
-        goal and goal.get('latitude') is not None and goal.get('longitude') is not None) else None
+        not direction_center and goal and goal.get('latitude') is not None and goal.get('longitude') is not None) else None
     bearing_groups = []
     for activity, options in zip(activities, groups):
-        return_stop = activity['category'] in ('return_to_start', 'return_to_current')
+        fixed_segment = (activity['category'] in ('return_to_start', 'return_to_current') or
+                         direction_center and activity['id'] != request.get('direction_activity_id'))
         bearing_groups.append([(group, None if bearing is None else sector_heading(bearing))
                                for group in options
-                               for bearing in [None if return_stop else point_bearing(start, group['center'])]])
+                               for bearing in [None if fixed_segment else point_bearing(direction_center or start, group['center'])]])
     goal_sector = sector_heading(goal_axis) if goal_axis is not None else None
     headings = HEADINGS if requested is None else (sector_heading(requested),)
     if review is not None:
@@ -73,6 +77,7 @@ def recommendation_rank(route: dict) -> tuple:
     nodes = route['nodes']
     return (-sum(node['place'].get('menu_status') == 'matched' for node in nodes),
             sum(bool(node['place'].get('venue_condition_unconfirmed')) for node in nodes),
+            -sum((node['place'].get('menu_model') or {}).get('relatedness', 0) for node in nodes),
             sum(node.get('travel_minutes') or 0 for node in nodes),
             sum(node['distance_km'] for node in nodes),
             route.get('corridor', {}).get('variant') == 'adjacent')

@@ -5,7 +5,7 @@
   const ROUTE_COLORS = ['#1665c1', '#ba4536', '#138064', '#7c459e', '#ae690d'];
   const REFERENCE_COLOR = '#b71931';
   const REFERENCE_ROUTE_COLORS = [REFERENCE_COLOR, '#176c8a', '#7352a8', '#9a6508', '#397044'];
-  const NAMES = { hiking:'등산', swimming:'수영', restaurant:'식사', shower:'샤워', bowling:'볼링',
+  const NAMES = { hiking:'등산', swimming:'수영', restaurant:'식사', shower:'샤워', bowling:'볼링', karaoke:'노래방',
     meeting:'약속', cafe:'카페', shopping:'쇼핑', pub:'술자리', subway_station:'지하철', return_home:'귀가',
     history_museum:'역사 박물관', palace:'고궁', market_food:'시장 먹거리', baseball_game:'야구 경기 관람',
     baseball_event:'야구 행사 관람', return_to_current:'현재 위치 복귀' };

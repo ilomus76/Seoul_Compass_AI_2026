@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from backend import baseball_schedule, context_parser, merchant_catalog, venue_details
+from backend import baseball_schedule, context_parser, menu_model, merchant_catalog, venue_details
 from backend.main import parse, region_recommend
 from backend.optimizer import recommend_routes
 from backend.region_planner import context_candidates, context_matches
@@ -25,7 +25,7 @@ def place(name, degrees, radius=1):
 
 
 def model_intent(*rows, **overrides):
-    empty_activity = dict(search_query=None, search_queries=[], industry_terms=[], venue_kind=None, named_place=None,
+    empty_activity = dict(search_query=None, search_queries=[], industry_terms=[], venue_kind=None, named_place=None, search_area=None,
                           menu_terms=[], event_terms=[], start_time=None,
                           end_time=None, earliest_start=None, preferred_time=None, duration_minutes=None,
                           duration_estimated=True, fixed_time=False, required=True)
@@ -163,7 +163,7 @@ class ContextAndMenuTests(unittest.TestCase):
                   'activities': [
                       {'category': 'history_museum', 'request_term': '근현대사 박물관', 'search_query': '한국 근현대사 박물관',
                        'search_queries': ['근대 역사 전시'], 'industry_terms': ['박물관'],
-                       'named_place': None, 'venue_kind': '박물관', 'menu_terms': [], 'event_terms': [], 'start_time': '10:00',
+                       'named_place': None, 'search_area': None, 'venue_kind': '박물관', 'menu_terms': [], 'event_terms': [], 'start_time': '10:00',
                        'end_time': '12:00', 'earliest_start': None, 'preferred_time': None, 'duration_minutes': None,
                        'duration_estimated': False, 'fixed_time': True, 'required': True}]}
         model = {'status': 'completed', 'output': [{
@@ -238,6 +238,91 @@ class ContextAndMenuTests(unittest.TestCase):
         self.assertIsNone(resolve('12월 4일이나 12월 5일에 관람', today))
 
     @patch('backend.baseball_schedule.daily_games', return_value=[])
+    @patch('backend.context_parser.resolve_area')
+    @patch('backend.context_parser.resolve_place')
+    @patch('backend.region_planner.context_candidates')
+    def test_named_neighborhoods_and_official_stadium_keep_the_whole_itinerary(self, candidates, locate, area, _games):
+        sinlim = {'type':'area', 'name':'신림', 'source':'kakao', 'address':'서울 관악구 신림동',
+                  'latitude':37.48945, 'longitude':126.92618}
+        stadium = {'type':'context', 'name':'고척스카이돔', 'source':'kakao', 'address':'서울 구로구 경인로 430',
+                   'latitude':37.498, 'longitude':126.867}
+        area.return_value = sinlim
+        locate.return_value = stadium
+        intent = model_intent({'category':'restaurant', 'request_term':'순대국', 'search_area':'신림',
+                               'preferred_time':'11:00', 'duration_minutes':45},
+                              {'category':'baseball_game', 'request_term':'야구 관람', 'search_area':'고척', 'duration_minutes':150},
+                              {'category':'karaoke', 'request_term':'노래방', 'preferred_time':'오후', 'duration_minutes':60},
+                              {'category':'restaurant', 'request_term':'삼겹살', 'earliest_start':'저녁', 'duration_minutes':60},
+                              travel_date='2026-12-05', region_scope='서울')
+        parsed = context_parser.resolve_intent(intent, None, 5)
+        self.assertTrue(parsed['live_place_plan'])
+        self.assertEqual(parsed['search_center'], sinlim)
+        self.assertEqual(parsed['activities'][1]['location'], stadium['name'])
+        self.assertEqual(parsed['activities'][1]['start_time'], '14:00')
+        self.assertEqual(parsed['activities'][2]['preferred_time'], '12:00')
+        self.assertEqual(parsed['activities'][3]['earliest_start'], '18:00')
+
+        def at(name, point, shift=0):
+            return {'id':name, 'name':name, 'lat':point['latitude'] + shift, 'lng':point['longitude'], 'source':'kakao'}
+
+        candidates.side_effect = [[at('신림 순대국', sinlim)], [at('고척스카이돔', stadium)],
+                                  [at('고척 노래방', stadium, .001)], [at('고척 삼겹살', stadium, .002)]]
+        result = region_recommend(RegionRecommendRequest(**parsed, contextual=True))
+        region = result['regions'][0]
+        self.assertEqual([p['name'] for p in region['search_anchors']], ['신림', '고척스카이돔'])
+        self.assertEqual([call.args[0]['lng'] for call in candidates.call_args_list], [126.92618, 126.867, 126.867, 126.867])
+        route = result['recommendations'][0]
+        self.assertEqual([node['place']['name'] for node in route['nodes']],
+                         ['신림 순대국', '고척스카이돔', '고척 노래방', '고척 삼겹살'])
+        self.assertGreater(route['nodes'][1]['distance_km'], 5)
+        self.assertEqual(route['schedule']['timeline'][1]['estimated_start'], '14:00')
+        self.assertGreater(route['schedule']['timeline'][2]['estimated_start'], '14:00')
+
+    def test_karaoke_candidates_use_provider_industry(self):
+        karaoke = {'name':'연습실', 'provider_category':'서비스,산업 > 여가시설 > 코인노래방'}
+        self.assertTrue(context_matches(karaoke, {'category':'karaoke'}))
+        self.assertFalse(context_matches({**karaoke,'provider_category':'음식점 > 술집'}, {'category':'karaoke'}))
+
+    @patch('backend.venue_details.TOUR_API_KEY', '')
+    def test_menu_name_evidence_ranks_above_an_unrelated_keyword_match(self):
+        venues = [{'name':'순대국집', 'provider_category':'음식점 > 순대국'},
+                  {'name':'삼겹살집', 'provider_category':'음식점 > 육류,고기요리'}]
+        unrelated, matching_name = venue_details.annotate_menus(venues, ['삼겹살'])
+        self.assertEqual(unrelated['venue_condition_unconfirmed'], '삼겹살')
+        self.assertNotIn('venue_condition_unconfirmed', matching_name)
+        self.assertEqual(matching_name['menu_status'], 'unconfirmed')
+        self.assertTrue(matching_name['menu_match_hint'])
+
+    @patch('backend.venue_details.TOUR_API_KEY', '')
+    @patch('backend.menu_model.menu_catalog')
+    def test_public_menu_requires_same_shop_address(self, catalog):
+        name = '검증용 고깃집'
+        shop = menu_model.ListedShop(name, ('생삼겹살',), menu_model.shop_features(name, []))
+        road = menu_model.address_key('서울특별시 구로구 경인로 430 (고척동) 1층')
+        catalog.return_value = [shop], {(menu_model.name_key(name), road): [shop]}
+        known = {'name':name, 'source':'kakao', 'address':'서울 구로구 경인로 430'}
+        wrong = {**known, 'address':'서울 구로구 경인로 431'}
+        found, inference = venue_details.annotate_menus([known, wrong], ['삼겹살'])
+        self.assertEqual(found['menu_status'], 'matched')
+        self.assertEqual(found['menu_evidence'][0]['menu'], '생삼겹살')
+        self.assertEqual(found['menu_evidence'][0]['published_date'], menu_model.PUBLIC_MENU_DATE)
+        self.assertEqual(inference['menu_status'], 'unconfirmed')
+        self.assertGreater(inference['menu_model']['relatedness'], 0)
+        self.assertEqual(inference['menu_evidence'], [])
+        self.assertFalse(menu_model.menu_matches('삼겹살', '삼겹살 판매 중단'))
+
+    @patch('backend.venue_details.TOUR_API_KEY', '')
+    @patch('backend.region_planner.search_listed_menus', return_value=[])
+    @patch('backend.region_planner.search_live')
+    def test_unverified_menu_candidates_stay_available_for_clustering(self, search, _listed):
+        item = lambda name: {**place(name, 10), 'provider_category':'음식점 > 육류,고기요리'}
+        search.return_value = [item('그릴 식당'), item('삼겹살집')]
+        candidates = context_candidates({'lat':0, 'lng':0}, activity(
+            'restaurant', 1, search_query='삼겹살', menu_terms=['삼겹살'], industry_terms=['육류']), 5, None)
+        self.assertEqual([row['name'] for row in candidates], ['삼겹살집', '그릴 식당'])
+        self.assertTrue(all(row['menu_status'] == 'unconfirmed' for row in candidates))
+
+    @patch('backend.baseball_schedule.daily_games', return_value=[])
     @patch('backend.context_parser.resolve_place')
     def test_december_fifth_game_anchors_food_search_at_stadium_even_with_outside_return(self, locate, _daily_games):
         stadium = {'name': '고척스카이돔', 'source': 'kakao', 'latitude': 37.498, 'longitude': 126.867,
@@ -276,7 +361,21 @@ class ContextAndMenuTests(unittest.TestCase):
         self.assertTrue(parsed['live_place_plan'])
         self.assertEqual(parsed['activities'][0]['start_time'], '18:30')
         self.assertEqual(parsed['activities'][0]['location'], '잠실야구장')
+        self.assertTrue(parsed['activities'][0]['official_event_time'])
         self.assertEqual([option['source'] for option in parsed['event_options']], ['TheSportsDB'])
+
+    @patch('backend.context_parser.event_options')
+    def test_game_before_requested_time_is_an_alternative(self, options):
+        options.return_value = ([{'date': '2026-12-05', 'start_time': '14:00', 'kind': 'baseball_game',
+                                  'name': '본경기', 'venue': '고척스카이돔',
+                                  'location': {'source': 'kakao', 'latitude': 37.498, 'longitude': 126.867,
+                                               'address': '서울 구로구'}}], False)
+        intent = model_intent({'category': 'baseball_game', 'request_term': '저녁에 야구 경기',
+                               'earliest_start': '18:00'}, travel_date='2026-12-05')
+        parsed = context_parser.resolve_intent(intent, None, 5)
+        self.assertFalse(parsed['live_place_plan'])
+        self.assertTrue(parsed['reference_plan_available'])
+        self.assertIn('요청한 야구 경기 일정 미확인', parsed['activities'][0]['visit_warning']['reason'])
 
     def test_named_region_and_explicit_current_radius_take_precedence_over_seoul_default(self):
         origin = {'type': 'current_location', 'latitude': 37.5, 'longitude': 126.76}
@@ -316,6 +415,17 @@ class ContextAndMenuTests(unittest.TestCase):
         self.assertEqual(found['menu_status'], 'matched')
         self.assertEqual(found['operating_hours']['hours'], '10:00~20:00')
         self.assertEqual(items.call_args.kwargs['contentId'], 'good')
+
+    @patch('backend.venue_details.TOUR_API_KEY', 'example')
+    @patch('backend.venue_details.tour_items')
+    def test_facility_hours_are_linked_to_the_same_place_and_content_type(self, items):
+        museum = place('역사박물관', 20)
+        items.side_effect = [[{'title': museum['name'], 'contentid': 'museum',
+                              'mapx': museum['lng'], 'mapy': museum['lat']}],
+                             [{'usetimeculture': '화~일 10:00~18:00', 'restdateculture': '매주 월요일'}]]
+        found = venue_details.annotate_operating_hours([museum], 'history_museum')[0]
+        self.assertEqual(found['operating_hours']['holidays'], '매주 월요일')
+        self.assertEqual(items.call_args.kwargs, {'contentId': 'museum', 'contentTypeId': '14'})
 
     @patch('backend.venue_details.TOUR_API_KEY', '')
     def test_public_phone_does_not_count_as_menu_confirmation(self):

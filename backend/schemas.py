@@ -38,6 +38,8 @@ class Activity(BaseModel):
     duration_estimated: bool = True
     duration_source: Optional[str] = None
     location: Optional[str] = None
+    search_area: Optional[str] = None
+    search_anchor: Optional[Location] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     earliest_start: Optional[str] = None
@@ -46,6 +48,7 @@ class Activity(BaseModel):
     duration_minutes: Optional[int] = None
     fixed_location: bool = False
     fixed_time: bool = False
+    official_event_time: bool = False
     required: bool = True
     visit_warning: Optional[VisitWarning] = None
 
@@ -89,6 +92,8 @@ class RouteRecommendRequest(BaseModel):
     start_location: Location
     search_center: Optional[Location] = None
     activities: List[Activity]
+    travel_date: Optional[str] = None
+    departure_time: Optional[str] = None
     radius_km: float = 5.0
     transport_modes: List[str] = Field(default_factory=list)
     weights: Optional[Dict[str, float]] = None
